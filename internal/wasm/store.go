@@ -423,6 +423,13 @@ func (m *ModuleInstance) resolveImports(ctx context.Context, module *Module) (er
 			}
 		}
 		if importedModule == nil {
+			if moduleName == "" {
+				for i, imp := range imports {
+					if imp.Module == "" {
+						return fmt.Errorf("import[%d] has an empty module name", i)
+					}
+				}
+			}
 			importedModule, err = m.s.module(moduleName)
 			if err != nil {
 				return err

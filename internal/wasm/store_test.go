@@ -345,6 +345,21 @@ func TestStore_Instantiate_Errors(t *testing.T) {
 		require.EqualError(t, err, "module[non-exist] not instantiated")
 	})
 
+	t.Run("fail resolve import with empty module name", func(t *testing.T) {
+		s := newStore()
+		_, err = s.Instantiate(testCtx, &Module{
+			TypeSection: []FunctionType{v_v},
+			ImportSection: []Import{
+				// The first import resolve succeeds -> increment hm.dependentCount.
+				{Type: ExternTypeFunc, Module: "", Name: "fn", DescFunc: 0},
+			},
+			ImportPerModule: map[string][]*Import{
+				"": {{Name: "fn", DescFunc: 0}},
+			},
+		}, importingModuleName, nil, []FunctionTypeID{0})
+		require.EqualError(t, err, "import[0] has an empty module name")
+	})
+
 	t.Run("creating engine failed", func(t *testing.T) {
 		s := newStore()
 

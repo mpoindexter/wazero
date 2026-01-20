@@ -478,9 +478,6 @@ func (m *Module) validateMemory(memory *Memory, globals []GlobalType, _ api.Core
 func (m *Module) validateImports(enabledFeatures api.CoreFeatures) error {
 	for i := range m.ImportSection {
 		imp := &m.ImportSection[i]
-		if imp.Module == "" {
-			return fmt.Errorf("import[%d] has an empty module name", i)
-		}
 		switch imp.Type {
 		case ExternTypeFunc:
 			if int(imp.DescFunc) >= len(m.TypeSection) {
