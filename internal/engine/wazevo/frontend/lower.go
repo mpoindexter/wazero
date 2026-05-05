@@ -1353,16 +1353,62 @@ func (c *Compiler) lowerCurrentOpcode() {
 		c.switchTo(originalLen, loopHeader)
 
 		if c.ensureTermination {
+			// Cheap inline check: load moduleClosedPtr from execCtx, then atomically
+			// load the uint64 it points to (ModuleInstance.Closed). If zero, fall
+			// through to the loop body. If non-zero (set by the cancellation
+			// watchdog OR by an explicit module.Close from another goroutine),
+			// branch to the slow path which makes the trampoline call that
+			// re-enters Go and reports the error via FailIfClosed.
+			//
+			// The first load (the pointer field) doesn't need atomic semantics: it
+			// is written once at callEngine setup and not modified afterwards.
+			// The second load reads cross-thread state, so it uses an atomic load
+			// to match the writer's atomic.Uint64.CompareAndSwap (LDAR on arm64,
+			// MOVQ on amd64 since x86-TSO already provides acquire-load semantics).
+			closedPtr := builder.AllocateInstruction().
+				AsLoad(c.execCtxPtrValue,
+					wazevoapi.ExecutionContextOffsetModuleClosedPtr.U32(),
+					ssa.TypeI64,
+				).Insert(builder).Return()
+			flag := builder.AllocateInstruction().
+				AsAtomicLoad(closedPtr, 8, ssa.TypeI64).Insert(builder).Return()
+
+			slowPath := builder.AllocateBasicBlock()
+			loopBody := builder.AllocateBasicBlock()
+			c.addBlockParamsFromWasmTypes(bt.Params, slowPath)
+			c.addBlockParamsFromWasmTypes(bt.Params, loopBody)
+
+			// Forward the loop's params (loopHeader's block params, currently on
+			// the value stack at state.values[originalLen:]) through both branches.
+			fwdArgs := c.allocateVarLengthValues(len(bt.Params), state.values[originalLen:]...)
+
+			builder.AllocateInstruction().
+				AsBrnz(flag, fwdArgs, slowPath).
+				Insert(builder)
+			c.insertJumpToBlock(fwdArgs, loopBody)
+
+			// Slow path: existing trampoline call, then jump to loop body.
+			builder.SetCurrentBlock(slowPath)
 			checkModuleExitCodePtr := builder.AllocateInstruction().
 				AsLoad(c.execCtxPtrValue,
 					wazevoapi.ExecutionContextOffsetCheckModuleExitCodeTrampolineAddress.U32(),
 					ssa.TypeI64,
 				).Insert(builder).Return()
-
-			args := c.allocateVarLengthValues(1, c.execCtxPtrValue)
+			callArgs := c.allocateVarLengthValues(1, c.execCtxPtrValue)
 			builder.AllocateInstruction().
-				AsCallIndirect(checkModuleExitCodePtr, &c.checkModuleExitCodeSig, args).
+				AsCallIndirect(checkModuleExitCodePtr, &c.checkModuleExitCodeSig, callArgs).
 				Insert(builder)
+			slowPathParams := make([]ssa.Value, slowPath.Params())
+			for i := range slowPathParams {
+				slowPathParams[i] = slowPath.Param(i)
+			}
+			c.insertJumpToBlock(c.allocateVarLengthValues(len(slowPathParams), slowPathParams...), loopBody)
+
+			builder.Seal(slowPath)
+			// Continue lowering the rest of the loop body in loopBody, with its
+			// params (forwarded copies of loopHeader's) on the value stack.
+			c.switchTo(originalLen, loopBody)
+			builder.Seal(loopBody)
 		}
 	case wasm.OpcodeIf:
 		bt := c.readBlockType()

@@ -136,6 +136,11 @@ type (
 		// when an exception is caught. Compiled code loads this from execCtx
 		// after the trampoline call to decide which handler to dispatch to.
 		caughtExceptionClauseIdx int64
+		// moduleClosedPtr is a pointer to the underlying uint64 of the
+		// owning ModuleInstance.Closed field. Compiled code reads through it
+		// at every loop back-edge (when ensureTermination is on) and calls
+		// back into Go when non-zero.
+		moduleClosedPtr *uint64
 	}
 )
 
