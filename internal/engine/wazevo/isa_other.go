@@ -27,3 +27,15 @@ func goCallStackView(stackPointerBeforeGoCall *uint64) []uint64 {
 func adjustClonedStack(oldsp, oldTop, sp, fp, top uintptr) {
 	panic("unsupported architecture")
 }
+
+// tryTableFrameTop returns the top of the frame of the function that made the
+// try_table enter Go call. See the amd64/arm64 implementations.
+func tryTableFrameTop(sp, fp, top uintptr) uintptr {
+	panic("unsupported architecture")
+}
+
+// restoreFrameSnapshot copies a try_table frame snapshot back over the live
+// stack. See the amd64/arm64 implementations.
+func restoreFrameSnapshot(sp, fp, hi uintptr, snapshot []byte) {
+	panic("unsupported architecture")
+}

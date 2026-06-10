@@ -65,6 +65,9 @@ var ehBrOwnLabelWasm []byte
 //go:embed testdata/eh_catch_outside.wasm
 var ehCatchOutsideWasm []byte
 
+//go:embed testdata/eh_grow_in_try.wasm
+var ehGrowInTryWasm []byte
+
 // TestExceptionHandlingInterpreter runs EH tests only for the interpreter.
 func TestExceptionHandlingInterpreter(t *testing.T) {
 	cfg := wazero.NewRuntimeConfigInterpreter().
@@ -116,6 +119,30 @@ func runEHTests(t *testing.T, cfg wazero.RuntimeConfig) {
 	t.Run("catch_outside", func(t *testing.T) {
 		testEHCatchOutside(t, cfg)
 	})
+	t.Run("grow_in_try", func(t *testing.T) {
+		testEHGrowInTry(t, cfg)
+	})
+}
+
+// testEHGrowInTry forces one or more stack-buffer grows (relocations) inside a
+// try body before the throw, exercising the partial-snapshot restore against a
+// relocated stack buffer (rel-offset recompute + amd64 frame-linkage preserve).
+func testEHGrowInTry(t *testing.T, cfg wazero.RuntimeConfig) {
+	ctx := context.Background()
+	r := wazero.NewRuntimeWithConfig(ctx, cfg)
+	defer r.Close(ctx)
+
+	mod, err := r.InstantiateWithConfig(ctx, ehGrowInTryWasm,
+		wazero.NewModuleConfig().WithStartFunctions())
+	require.NoError(t, err)
+
+	// Recurse deeply (grows the stack) inside the try, then throw. The handler
+	// must restore the caller's frame and read the throw-time sentinel (7).
+	// 1500 deep stays under the interpreter's 2000-frame ceiling while far
+	// exceeding wazevo's 10240-byte initial stack, forcing multiple grows.
+	res, err := mod.ExportedFunction("run").Call(ctx, 1500)
+	require.NoError(t, err)
+	require.Equal(t, int32(7), api.DecodeI32(res[0]))
 }
 
 // testEHCrossFrameCatch is the core reproducer for the interpreter bug:

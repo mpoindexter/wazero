@@ -64,6 +64,37 @@ func UnwindStack(sp, _, top uintptr, returnAddresses []uintptr) []uintptr {
 	return returnAddresses
 }
 
+// FrameTop returns the top (high address) of the frame whose stack pointer is
+// `sp`, i.e. the stack pointer of its caller. It is one iteration of the
+// UnwindStack frame walk, deriving the boundary from the per-frame frame_size /
+// arg-ret metadata.
+func FrameTop(sp uintptr) uintptr {
+	// View the frame to read frame_size and size_of_arg_ret without a
+	// uintptr->Pointer conversion (matches UnwindStack's stackView approach).
+	var buf []byte
+	{
+		//nolint:staticcheck
+		hdr := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
+		hdr.Data = sp
+		hdr.Len = 32
+		hdr.Cap = 32
+	}
+	frameSize := binary.LittleEndian.Uint64(buf)
+	i := frameSize + 16 // frame size + aligned space.
+	i += 8              // ret addr.
+	// Re-view at the size_of_arg_ret slot, then advance past the arg/ret area.
+	{
+		//nolint:staticcheck
+		hdr := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
+		hdr.Data = sp + uintptr(i)
+		hdr.Len = 8
+		hdr.Cap = 8
+	}
+	sizeOfArgRet := binary.LittleEndian.Uint64(buf)
+	i += 8 + sizeOfArgRet
+	return sp + uintptr(i)
+}
+
 // GoCallStackView implements wazevo.goCallStackView.
 func GoCallStackView(stackPointerBeforeGoCall *uint64) []uint64 {
 	//                  (high address)

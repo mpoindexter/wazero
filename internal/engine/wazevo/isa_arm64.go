@@ -30,3 +30,18 @@ func adjustClonedStack(oldsp, oldTop, sp, fp, top uintptr) {
 	//  so no need to adjustment on arm64. However, when we make it absolute, which in my opinion is better perf-wise
 	//  at the expense of slightly costly stack growth, we need to adjust the pushed frame pointers.
 }
+
+// tryTableFrameTop returns the top (high address) of the frame of the function
+// that made the try_table enter Go call. arm64 has no frame-pointer chain, so we
+// derive the boundary by walking one frame record up from sp. fp is unused.
+func tryTableFrameTop(sp, fp, top uintptr) uintptr {
+	return arm64.FrameTop(sp)
+}
+
+// restoreFrameSnapshot copies the saved frame bytes back over the live stack
+// region [sp, hi). arm64 frames contain no absolute stack pointers (saved SPs are
+// frame-size-relative; see adjustClonedStack), so a plain copy is correct even
+// after a stack grow. fp is unused.
+func restoreFrameSnapshot(sp, fp, hi uintptr, snapshot []byte) {
+	copy(stackBytesView(sp, hi), snapshot)
+}

@@ -49,24 +49,34 @@ type (
 		// pendingException holds the most recently caught exception, so handler
 		// code can read its params after re-entry.
 		pendingException *wasm.Exception
+		// ehSnapshotArena is a bump-allocated scratch buffer holding, per try
+		// handler, its partial stack snapshot followed by its localsSaveArea (when
+		// owned). It is grown and reclaimed in lockstep with tryHandlers, using
+		// len(ehSnapshotArena) as the bump top.
+		ehSnapshotArena []byte
 	}
 
 	// tryHandler records the state at a try_table entry for exception handling.
 	// On match, we restore the stack to the checkpoint state and re-enter at returnAddress.
 	tryHandler struct {
-		// Cloned stack and state from the try_table entry checkpoint,
-		// using the same approach as experimental.Snapshot.
-		sp, fp, top    uintptr
-		returnAddress  *byte
-		savedRegisters [64][2]uint64
-		stack          []byte // cloned stack
+		// relSp/relFp are the entry stack/frame pointers expressed relative to
+		// stackTop (top - ptr), so they stay valid even if the stack buffer is
+		// grown (and therefore relocated) between entry and a caught throw.
+		// relHi is the high bound of the snapshot region (== relFp on amd64).
+		relSp, relFp, relHi uintptr
+		returnAddress       *byte
+		savedRegisters      [64][2]uint64
+		// snapOffset/snapLen locate the frame snapshot in ehSnapshotArena.
+		// snapOffset is also the handler's low-water mark for reclamation, since
+		// the snapshot is the first thing it reserves.
+		snapOffset, snapLen int
 		// catchClauses describes what exceptions this handler catches.
 		catchClauses []wazevoapi.CatchClauseInstance
-		// localsSaveArea is a heap buffer where locals are mirrored inside
-		// try bodies. Handlers read from it to get updated values.
-		// Nil for nested same-function try_tables that reuse the enclosing
-		// handler's save area.
-		localsSaveArea []uint64
+		// localsOffset locates this handler's localsSaveArea in ehSnapshotArena.
+		// localsOwned is false when it reuses an enclosing same-function handler's
+		// area (or the function has no locals).
+		localsOffset int
+		localsOwned  bool
 		// moduleInstance is the module that set up this try handler.
 		// Used for tag matching in doHandleException (the tag index in
 		// catch clauses is relative to this module's tag index space).
@@ -328,6 +338,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			// Ensures that we can reuse this callEngine even after an error.
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			c.tryHandlers = c.tryHandlers[:0]
+			c.ehSnapshotArena = c.ehSnapshotArena[:0]
 		}
 	}()
 
@@ -606,8 +617,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 		case wazevoapi.ExitCodeNullReference:
 			panic(wasmruntime.ErrRuntimeNullReference)
 		case wazevoapi.ExitCodeTryTableEnter:
-			// Save current state as a try handler checkpoint using stack cloning
-			// (same approach as experimental.Snapshot).
+			// Save a checkpoint for this try_table so a matching throw can restore it.
 			// The encoded exit code (with tryTableID in upper bits) is on the
 			// Go call stack as the second trampoline argument, not in execCtx.exitCode.
 			tryTableEnterStack := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
@@ -616,28 +626,43 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			me := mod.Engine.(*moduleEngine)
 			info := &me.parent.tryTableInfo[tryTableID]
 			returnAddress := c.execCtx.goCallReturnAddress
-			oldTop, oldSp := c.stackTop, uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall))
-			newSP, newFP, newTop, newStack := c.cloneStack(uintptr(len(c.stack)) + 16)
-			adjustClonedStack(oldSp, oldTop, newSP, newFP, newTop)
 
-			// Allocate a heap buffer for locals so handlers can read throw-time values.
-			// Nested try_tables in the same function (ReuseLocals) share the enclosing handler's save area.
-			var saveArea []uint64
+			top := c.stackTop
+			sp := uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall))
+			fp := c.execCtx.framePointerBeforeGoCall
+			hi := tryTableFrameTop(sp, fp, top)
+
+			// Snapshot only F's own frame; everything at/above the frame top is
+			// invariant until a caught throw. Offsets are stored relative to top
+			// so they survive a stack grow (relocation) before the throw.
+			snapLen := int(hi - sp)
+			snapOffset := c.reserveEHSnapshot(snapLen)
+			copy(c.ehSnapshotArena[snapOffset:snapOffset+snapLen], stackBytesView(sp, hi))
+
+			// Reserve this handler's locals save area, unless it reuses an enclosing
+			// same-function handler's. The reserve above may have relocated the
+			// arena, so (re)publish localsSaveAreaPtr from the current base.
+			localsOffset, localsOwned := 0, false
 			if info.NumLocals > 0 && !info.ReuseLocals {
-				saveArea = make([]uint64, info.NumLocals*2) // 16 bytes per local
-				c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&saveArea[0]))
+				localsOffset = c.reserveEHSnapshot(info.NumLocals * 2 * 8) // 16 bytes per local
+				localsOwned = true
+				c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&c.ehSnapshotArena[localsOffset]))
+			} else {
+				c.restoreLocalsSaveAreaPtr(len(c.tryHandlers) - 1)
 			}
 
 			c.tryHandlers = append(c.tryHandlers, tryHandler{
-				sp:             newSP,
-				fp:             newFP,
-				top:            newTop,
+				relSp:          top - sp,
+				relFp:          top - fp,
+				relHi:          top - hi,
 				returnAddress:  returnAddress,
 				savedRegisters: c.execCtx.savedRegisters,
-				stack:          newStack,
+				snapOffset:     snapOffset,
+				snapLen:        snapLen,
 				catchClauses:   info.CatchClauses,
+				localsOffset:   localsOffset,
+				localsOwned:    localsOwned,
 				moduleInstance: mod,
-				localsSaveArea: saveArea,
 			})
 			// Set clauseIdx = -1 (no exception) in execCtx for the compiled code
 			// to read after the trampoline returns.
@@ -646,9 +671,10 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeTryTableLeave:
-			// Pop the most recent try handler and restore the locals save
-			// area pointer from the handler below (or clear it).
+			// Pop the most recent try handler, free its arena region (snapOffset is
+			// its low-water mark), and restore localsSaveAreaPtr from the one below.
 			if len(c.tryHandlers) > 0 {
+				c.ehSnapshotArena = c.ehSnapshotArena[:c.tryHandlers[len(c.tryHandlers)-1].snapOffset]
 				c.tryHandlers = c.tryHandlers[:len(c.tryHandlers)-1]
 				c.restoreLocalsSaveAreaPtr(len(c.tryHandlers) - 1)
 			}
@@ -682,7 +708,8 @@ func (c *callEngine) doHandleException(exn *wasm.Exception) bool {
 			}
 			if matched {
 				// Restore localsSaveAreaPtr from the matched handler or
-				// the nearest enclosing one (same-function reuse).
+				// the nearest enclosing one (same-function reuse). The catch
+				// pad reloads throw-time locals from it on re-entry.
 				c.restoreLocalsSaveAreaPtr(i)
 
 				// Pop all handlers at and above this one.
@@ -691,14 +718,24 @@ func (c *callEngine) doHandleException(exn *wasm.Exception) bool {
 				// Store the caught exception so handler code can read params.
 				c.pendingException = exn
 
-				// Restore the cloned stack (like snapshot.doRestore).
-				spp := *(**uint64)(unsafe.Pointer(&h.sp))
-				c.stack = h.stack
-				c.stackTop = h.top
+				// Copy F's frame snapshot back over the (current, possibly grown)
+				// live stack. Pointers are recomputed against the current stackTop;
+				// the snapshot holds no absolute pointers, so no fixup is needed.
+				top := c.stackTop
+				sp := top - h.relSp
+				fp := top - h.relFp
+				hi := top - h.relHi
+				restoreFrameSnapshot(sp, fp, hi, c.ehSnapshotArena[h.snapOffset:h.snapOffset+h.snapLen])
+
+				// Free the arena down to handler i (after the copy-back, which reads
+				// its snapshot). i's locals stay valid in the backing array for the
+				// catch pad's reload, which runs before the next reserve.
+				c.ehSnapshotArena = c.ehSnapshotArena[:h.snapOffset]
+
+				spp := *(**uint64)(unsafe.Pointer(&sp))
 				ec := &c.execCtx
-				ec.stackBottomPtr = &c.stack[0]
 				ec.stackPointerBeforeGoCall = spp
-				ec.framePointerBeforeGoCall = h.fp
+				ec.framePointerBeforeGoCall = fp
 				ec.goCallReturnAddress = h.returnAddress
 				ec.savedRegisters = h.savedRegisters
 
@@ -716,8 +753,8 @@ func (c *callEngine) doHandleException(exn *wasm.Exception) bool {
 // or clears it if none is found.
 func (c *callEngine) restoreLocalsSaveAreaPtr(from int) {
 	for i := from; i >= 0; i-- {
-		if sa := c.tryHandlers[i].localsSaveArea; len(sa) > 0 {
-			c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&sa[0]))
+		if h := &c.tryHandlers[i]; h.localsOwned {
+			c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&c.ehSnapshotArena[h.localsOffset]))
 			return
 		}
 	}
@@ -755,6 +792,33 @@ func (c *callEngine) growStack() (newSP, newFP uintptr, err error) {
 	newLen := 2*currentLen + c.execCtx.stackGrowRequiredSize + 16 // Stack might be aligned to 16 bytes, so add 16 bytes just in case.
 	newSP, newFP, c.stackTop, c.stack = c.cloneStack(newLen)
 	c.execCtx.stackBottomPtr = &c.stack[0]
+	return
+}
+
+// reserveEHSnapshot grows ehSnapshotArena by n bytes and returns the offset of
+// the new region, reusing the backing array's capacity across calls. The backing
+// array may be relocated, so callers reference regions by offset (and refresh any
+// absolute pointers into it afterward).
+func (c *callEngine) reserveEHSnapshot(n int) (offset int) {
+	offset = len(c.ehSnapshotArena)
+	need := offset + n
+	if need <= cap(c.ehSnapshotArena) {
+		c.ehSnapshotArena = c.ehSnapshotArena[:need]
+	} else {
+		grown := make([]byte, need, 2*need)
+		copy(grown, c.ehSnapshotArena)
+		c.ehSnapshotArena = grown
+	}
+	return
+}
+
+// stackBytesView returns a []byte aliasing the live stack region [lo, hi).
+func stackBytesView(lo, hi uintptr) (b []byte) {
+	//nolint:staticcheck
+	sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	sh.Data = lo
+	sh.Len = int(hi - lo)
+	sh.Cap = int(hi - lo)
 	return
 }
 
