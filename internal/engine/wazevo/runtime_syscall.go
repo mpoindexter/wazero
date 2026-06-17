@@ -25,10 +25,14 @@ func runtime_exitsyscall()
 // must not grow the stack between entersyscall and exitsyscall.
 //
 //go:nosplit
-func entrypoint(preambleExecutable, functionExecutable *byte, executionContextPtr uintptr, moduleContextPtr *byte, paramResultStackPtr *uint64, goAllocatedStackSlicePtr uintptr) {
-	runtime_entersyscall()
-	entrypointAsm(preambleExecutable, functionExecutable, executionContextPtr, moduleContextPtr, paramResultStackPtr, goAllocatedStackSlicePtr)
-	runtime_exitsyscall()
+func entrypoint(preambleExecutable, functionExecutable *byte, executionContextPtr uintptr, moduleContextPtr *byte, paramResultStackPtr *uint64, goAllocatedStackSlicePtr uintptr, ensureTermination bool) {
+	if ensureTermination {
+		runtime_entersyscall()
+		entrypointAsm(preambleExecutable, functionExecutable, executionContextPtr, moduleContextPtr, paramResultStackPtr, goAllocatedStackSlicePtr)
+		runtime_exitsyscall()
+	} else {
+		entrypointAsm(preambleExecutable, functionExecutable, executionContextPtr, moduleContextPtr, paramResultStackPtr, goAllocatedStackSlicePtr)
+	}
 }
 
 // afterGoFunctionCallEntrypoint re-enters native code after a Go-side
@@ -36,8 +40,12 @@ func entrypoint(preambleExecutable, functionExecutable *byte, executionContextPt
 // syscall bracketing as entrypoint, same nosplit constraint.
 //
 //go:nosplit
-func afterGoFunctionCallEntrypoint(executable *byte, executionContextPtr uintptr, stackPointer, framePointer uintptr) {
-	runtime_entersyscall()
-	afterGoFunctionCallEntrypointAsm(executable, executionContextPtr, stackPointer, framePointer)
-	runtime_exitsyscall()
+func afterGoFunctionCallEntrypoint(executable *byte, executionContextPtr uintptr, stackPointer, framePointer uintptr, ensureTermination bool) {
+	if ensureTermination {
+		runtime_entersyscall()
+		afterGoFunctionCallEntrypointAsm(executable, executionContextPtr, stackPointer, framePointer)
+		runtime_exitsyscall()
+	} else {
+		afterGoFunctionCallEntrypointAsm(executable, executionContextPtr, stackPointer, framePointer)
+	}
 }
