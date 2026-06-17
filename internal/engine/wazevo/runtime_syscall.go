@@ -21,31 +21,38 @@ func runtime_exitsyscall()
 
 // entrypoint wraps the native-execution entry point with entersyscall /
 // exitsyscall so the Go runtime can retake this goroutine's P while wasm
-// is running. Marked nosplit because entersyscall sets throwsplit and we
-// must not grow the stack between entersyscall and exitsyscall.
-//
-//go:nosplit
+// is running.
 func entrypoint(preambleExecutable, functionExecutable *byte, executionContextPtr uintptr, moduleContextPtr *byte, paramResultStackPtr *uint64, goAllocatedStackSlicePtr uintptr, ensureTermination bool) {
 	if ensureTermination {
-		runtime_entersyscall()
-		entrypointAsm(preambleExecutable, functionExecutable, executionContextPtr, moduleContextPtr, paramResultStackPtr, goAllocatedStackSlicePtr)
-		runtime_exitsyscall()
+		entrypointEnsureTermination(preambleExecutable, functionExecutable, executionContextPtr, moduleContextPtr, paramResultStackPtr, goAllocatedStackSlicePtr)
 	} else {
 		entrypointAsm(preambleExecutable, functionExecutable, executionContextPtr, moduleContextPtr, paramResultStackPtr, goAllocatedStackSlicePtr)
 	}
 }
 
-// afterGoFunctionCallEntrypoint re-enters native code after a Go-side
-// dispatcher iteration (host call, FailIfClosed, stack grow, etc.). Same
-// syscall bracketing as entrypoint, same nosplit constraint.
+// Marked nosplit because entersyscall sets throwsplit and we
+// must not grow the stack between entersyscall and exitsyscall.
 //
 //go:nosplit
+func entrypointEnsureTermination(preambleExecutable, functionExecutable *byte, executionContextPtr uintptr, moduleContextPtr *byte, paramResultStackPtr *uint64, goAllocatedStackSlicePtr uintptr) {
+	runtime_entersyscall()
+	entrypointAsm(preambleExecutable, functionExecutable, executionContextPtr, moduleContextPtr, paramResultStackPtr, goAllocatedStackSlicePtr)
+	runtime_exitsyscall()
+}
+
+// afterGoFunctionCallEntrypoint re-enters native code after a Go-side
+// dispatcher iteration (host call, FailIfClosed, stack grow, etc.).
 func afterGoFunctionCallEntrypoint(executable *byte, executionContextPtr uintptr, stackPointer, framePointer uintptr, ensureTermination bool) {
 	if ensureTermination {
-		runtime_entersyscall()
-		afterGoFunctionCallEntrypointAsm(executable, executionContextPtr, stackPointer, framePointer)
-		runtime_exitsyscall()
+		afterGoFunctionCallEntrypointEnsureTermination(executable, executionContextPtr, stackPointer, framePointer)
 	} else {
 		afterGoFunctionCallEntrypointAsm(executable, executionContextPtr, stackPointer, framePointer)
 	}
+}
+
+//go:nosplit
+func afterGoFunctionCallEntrypointEnsureTermination(executable *byte, executionContextPtr uintptr, stackPointer, framePointer uintptr) {
+	runtime_entersyscall()
+	afterGoFunctionCallEntrypointAsm(executable, executionContextPtr, stackPointer, framePointer)
+	runtime_exitsyscall()
 }
