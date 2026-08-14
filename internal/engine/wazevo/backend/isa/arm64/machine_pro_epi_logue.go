@@ -332,7 +332,13 @@ func (m *machine) setupEpilogueAfter(cur *instruction) {
 
 // removeUntilRet removes the instructions starting from `cur` until the first `ret` instruction.
 func (m *machine) removeUntilRet(cur *instruction) {
-	for ; cur != nil; cur = cur.next {
+	// Stop at a nop0, which every block both begins and ends with. Removal is only a size
+	// optimization -- the epilogue is emitted before the tail jump, so whatever follows it
+	// is already unreachable -- so bounding it to the tail call's own block is safe. It
+	// also keeps us from cutting a live return sequence out of a later block when the
+	// return we are looking for is not adjacent, which is the case under exception
+	// handling: there the return sits in a continuation block after the landing-pad edge.
+	for ; cur != nil && cur.kind != nop0; cur = cur.next {
 		prev, next := cur.prev, cur.next
 		prev.next = next
 		if next != nil {

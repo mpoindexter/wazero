@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -182,28 +183,39 @@ func serializeCompiledModule(wazeroVersion string, cm *compiledModule) io.Reader
 	} else {
 		buf.WriteByte(0) // indicates that source map is not present.
 	}
-	// Try-table info: number of try_tables (4 bytes), then for each:
-	// numLocals (4 bytes), reuseLocals (1 byte), clause count (4 bytes),
-	// then for each clause: kind (1 byte) + tagIndex (4 bytes), then
-	// exnref local count (4 bytes) and each index (4 bytes).
-	buf.Write(u32.LeBytes(uint32(len(cm.tryTableInfo))))
-	for _, info := range cm.tryTableInfo {
-		buf.Write(u32.LeBytes(uint32(info.NumLocals)))
-		b := byte(0)
-		if info.ReuseLocals {
-			b = 1
+
+	if tti := cm.tryTableInfo; len(tti) > 0 {
+		buf.WriteByte(1) // indicates that try table info is present
+		// Try-table info: per function: try_table count (uint32), then per try_table: clause count (uint32), then per clause:
+		// kind (1 byte) + tagIndex (uint32).
+		for _, infos := range cm.tryTableInfo {
+			buf.Write(u32.LeBytes(uint32(len(infos))))
+			for _, info := range infos {
+				buf.Write(u32.LeBytes(uint32(len(info.CatchClauses))))
+				for _, c := range info.CatchClauses {
+					buf.WriteByte(c.Kind)
+					buf.Write(u32.LeBytes(c.TagIndex))
+				}
+			}
 		}
-		buf.WriteByte(b)
-		buf.Write(u32.LeBytes(uint32(len(info.CatchClauses))))
-		for _, c := range info.CatchClauses {
-			buf.WriteByte(c.Kind)
-			buf.Write(u32.LeBytes(c.TagIndex))
-		}
-		buf.Write(u32.LeBytes(uint32(len(info.ExnrefLocals))))
-		for _, l := range info.ExnrefLocals {
-			buf.Write(u32.LeBytes(l))
-		}
+	} else {
+		buf.WriteByte(0) // indicates try table info not present
 	}
+
+	if ets := cm.exceptionTables; len(ets) > 0 {
+		buf.WriteByte(1) // indicates that exception table info is present
+		// Exception table info: per function: entry count (uint32), then per exception table: call block start (uint32), landing pad (uint32)
+		for _, tbl := range cm.exceptionTables {
+			buf.Write(u32.LeBytes(uint32(len(tbl))))
+			for _, entry := range tbl {
+				buf.Write(u32.LeBytes(uint32(entry.CallBlockStart)))
+				buf.Write(u32.LeBytes(uint32(entry.LandingPad)))
+			}
+		}
+	} else {
+		buf.WriteByte(0) // indicates exception table info not present
+	}
+
 	return bytes.NewReader(buf.Bytes())
 }
 
@@ -313,54 +325,103 @@ func deserializeCompiledModule(wazeroVersion string, reader io.ReadCloser) (cm *
 			sm.executableOffsets = append(sm.executableOffsets, uintptr(executableRelativeOffset)+executableOffset)
 		}
 	}
-	// Try-table info.
-	if _, err = io.ReadFull(reader, eightBytes[:4]); err != nil {
-		// Treat old cache entries without try-table data as stale (trigger recompile).
-		return nil, true, nil
-	}
-	tableLen := binary.LittleEndian.Uint32(eightBytes[:4])
-	if tableLen > 0 {
-		cm.tryTableInfo = make([]wazevoapi.TryTableInfo, tableLen)
-		for i := uint32(0); i < tableLen; i++ {
-			if _, err = io.ReadFull(reader, eightBytes[:5]); err != nil {
-				return nil, false, fmt.Errorf("compilationcache: error reading try_table[%d] header: %v", i, err)
-			}
-			numLocals := int(binary.LittleEndian.Uint32(eightBytes[:4]))
-			reuseLocals := eightBytes[4] != 0
-			if _, err = io.ReadFull(reader, eightBytes[:4]); err != nil {
-				return nil, false, fmt.Errorf("compilationcache: error reading catch clause count for try_table[%d]: %v", i, err)
-			}
-			clauseCount := binary.LittleEndian.Uint32(eightBytes[:4])
-			clauses := make([]wazevoapi.CatchClauseInstance, clauseCount)
-			for j := uint32(0); j < clauseCount; j++ {
-				if _, err = io.ReadFull(reader, eightBytes[:5]); err != nil {
-					return nil, false, fmt.Errorf("compilationcache: error reading catch clause[%d][%d]: %v", i, j, err)
-				}
-				clauses[j] = wazevoapi.CatchClauseInstance{
-					Kind:     eightBytes[0],
-					TagIndex: binary.LittleEndian.Uint32(eightBytes[1:5]),
-				}
-			}
-			if _, err = io.ReadFull(reader, eightBytes[:4]); err != nil {
-				return nil, false, fmt.Errorf("compilationcache: error reading exnref local count for try_table[%d]: %v", i, err)
-			}
-			var exnrefLocals []uint32
-			if n := binary.LittleEndian.Uint32(eightBytes[:4]); n > 0 {
-				exnrefLocals = make([]uint32, n)
-				for j := range exnrefLocals {
-					if _, err = io.ReadFull(reader, eightBytes[:4]); err != nil {
-						return nil, false, fmt.Errorf("compilationcache: error reading exnref local[%d][%d]: %v", i, j, err)
-					}
-					exnrefLocals[j] = binary.LittleEndian.Uint32(eightBytes[:4])
-				}
-			}
-			cm.tryTableInfo[i] = wazevoapi.TryTableInfo{
-				CatchClauses: clauses,
-				NumLocals:    numLocals,
-				ReuseLocals:  reuseLocals,
-				ExnrefLocals: exnrefLocals,
-			}
+
+	if _, err := io.ReadFull(reader, eightBytes[:1]); err != nil {
+		if errors.Is(err, io.EOF) {
+			// No try table info - return stale cache
+			return nil, true, nil
 		}
+		return nil, false, fmt.Errorf("compilationcache: error reading try table info presence: %v", err)
+	}
+
+	if eightBytes[0] == 1 {
+		tryTable := make([][]wazevoapi.TryTableInfo, functionsNum)
+		for i := uint32(0); i < functionsNum; i++ {
+			tryTableInfoCount, err := readUint32(reader, &eightBytes)
+			if err != nil {
+				return nil, false, fmt.Errorf("compilationcache: error reading try table[%d] entry count: %v", i, err)
+			}
+
+			if tryTableInfoCount == 0 {
+				continue
+			}
+
+			tryTableInfos := make([]wazevoapi.TryTableInfo, tryTableInfoCount)
+			for j := uint32(0); j < tryTableInfoCount; j++ {
+				clauseCount, err := readUint32(reader, &eightBytes)
+				if err != nil {
+					return nil, false, fmt.Errorf("compilationcache: error reading try table[%d] entry[%d] clause count: %v", i, j, err)
+				}
+
+				catchClauses := make([]wazevoapi.CatchClauseInstance, clauseCount)
+				for k := uint32(0); k < clauseCount; k++ {
+					if _, err := io.ReadFull(reader, eightBytes[:1]); err != nil {
+						return nil, false, fmt.Errorf("compilationcache: error reading try table[%d] entry[%d] clause[%d] kind: %v", i, j, k, err)
+					}
+					kind := eightBytes[0]
+
+					tagIndex, err := readUint32(reader, &eightBytes)
+					if err != nil {
+						return nil, false, fmt.Errorf("compilationcache: error reading try table[%d] entry[%d] clause[%d] tag index: %v", i, j, k, err)
+					}
+
+					catchClauses[k] = wazevoapi.CatchClauseInstance{
+						Kind:     kind,
+						TagIndex: tagIndex,
+					}
+				}
+
+				tryTableInfos[j] = wazevoapi.TryTableInfo{
+					CatchClauses: catchClauses,
+				}
+			}
+			tryTable[i] = tryTableInfos
+		}
+		cm.tryTableInfo = tryTable
+	}
+
+	if _, err := io.ReadFull(reader, eightBytes[:1]); err != nil {
+		if errors.Is(err, io.EOF) {
+			// No exception table info - return stale cache
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("compilationcache: error reading exception table presence: %v", err)
+	}
+
+	if eightBytes[0] == 1 {
+		exceptionTables := make([][]wazevoapi.ExceptionTableEntry, functionsNum)
+		for i := uint32(0); i < functionsNum; i++ {
+			exceptionTableEntryCount, err := readUint32(reader, &eightBytes)
+			if err != nil {
+				return nil, false, fmt.Errorf("compilationcache: error reading exception table[%d] entry count: %v", i, err)
+			}
+
+			if exceptionTableEntryCount == 0 {
+				continue
+			}
+
+			exceptionTable := make([]wazevoapi.ExceptionTableEntry, exceptionTableEntryCount)
+
+			for j := uint32(0); j < exceptionTableEntryCount; j++ {
+				callBlockStart, err := readUint32(reader, &eightBytes)
+				if err != nil {
+					return nil, false, fmt.Errorf("compilationcache: error reading exception table[%d] entry[%d] call block start: %v", i, j, err)
+				}
+
+				landingPad, err := readUint32(reader, &eightBytes)
+				if err != nil {
+					return nil, false, fmt.Errorf("compilationcache: error reading exception table[%d] entry[%d] landing pad: %v", i, j, err)
+				}
+
+				exceptionTable[j] = wazevoapi.ExceptionTableEntry{
+					CallBlockStart: callBlockStart,
+					LandingPad:     landingPad,
+				}
+			}
+
+			exceptionTables[i] = exceptionTable
+		}
+		cm.exceptionTables = exceptionTables
 	}
 	return
 }
@@ -379,4 +440,13 @@ func readUint64(reader io.Reader, b *[8]byte) (uint64, error) {
 	// Read the u64 from the underlying buffer.
 	ret := binary.LittleEndian.Uint64(s)
 	return ret, nil
+}
+
+// readUint32 strictly reads an uint32 in little-endian byte order, using the
+// given array as a buffer.
+func readUint32(reader io.Reader, b *[8]byte) (uint32, error) {
+	if _, err := io.ReadFull(reader, b[:4]); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(b[:4]), nil
 }

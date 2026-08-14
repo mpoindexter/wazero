@@ -7,6 +7,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/tetratelabs/wazero/internal/engine/wazevo/wazevoapi"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/u32"
 	"github.com/tetratelabs/wazero/internal/u64"
@@ -40,7 +41,8 @@ func TestSerializeCompiledModule(t *testing.T) {
 				[]byte{1, 2, 3, 4, 5},       // code.
 				crcf([]byte{1, 2, 3, 4, 5}), // crc for the code.
 				[]byte{0},                   // no source map.
-				u32.LeBytes(0),              // empty catch clause table.
+				[]byte{0},                   // no catch clause table.
+				[]byte{0},                   // no exception tables.
 			),
 		},
 		{
@@ -58,7 +60,8 @@ func TestSerializeCompiledModule(t *testing.T) {
 				[]byte{1, 2, 3, 4, 5},       // code.
 				crcf([]byte{1, 2, 3, 4, 5}), // crc for the code.
 				[]byte{0},                   // no source map.
-				u32.LeBytes(0),              // empty catch clause table.
+				[]byte{0},                   // no catch clause table.
+				[]byte{0},                   // no exception tables.
 			),
 		},
 		{
@@ -80,7 +83,62 @@ func TestSerializeCompiledModule(t *testing.T) {
 				[]byte{1, 2, 3, 4, 5, 1, 2, 3},       // code.
 				crcf([]byte{1, 2, 3, 4, 5, 1, 2, 3}), // crc for the code.
 				[]byte{0},                            // no source map.
-				u32.LeBytes(0),                       // empty catch clause table.
+				[]byte{0},                            // no catch clause table.
+				[]byte{0},                            // no exception tables.
+			),
+		},
+		{
+			in: &compiledModule{
+				executables:     &executables{executable: []byte{1, 2, 3, 4, 5, 1, 2, 3}},
+				functionOffsets: []int{0, 5},
+				tryTableInfo: [][]wazevoapi.TryTableInfo{
+					{
+						{
+							CatchClauses: []wazevoapi.CatchClauseInstance{
+								{
+									Kind:     1,
+									TagIndex: 1234,
+								},
+							},
+						},
+					},
+					{},
+				},
+				exceptionTables: [][]wazevoapi.ExceptionTableEntry{
+					{
+						{
+							CallBlockStart: 1234,
+							LandingPad:     5678,
+						},
+					},
+					{},
+				},
+			},
+			exp: concat(
+				magic,
+				[]byte{byte(len(testVersion))},
+				[]byte(testVersion),
+				u32.LeBytes(2), // number of functions.
+				// Function index = 0.
+				u64.LeBytes(0), // offset.
+				// Function index = 1.
+				u64.LeBytes(5), // offset.
+				// Executable.
+				u64.LeBytes(8),                       // length of code.
+				[]byte{1, 2, 3, 4, 5, 1, 2, 3},       // code.
+				crcf([]byte{1, 2, 3, 4, 5, 1, 2, 3}), // crc for the code.
+				[]byte{0},                            // no source map.
+				[]byte{1},                            // catch clause table exists.
+				u32.LeBytes(1),                       // 1 try table
+				u32.LeBytes(1),                       // 1 catch clause
+				[]byte{1},                            // kind 1
+				u32.LeBytes(1234),                    // tag index 1234
+				u32.LeBytes(0),                       // no catch clauses
+				[]byte{1},                            // exception tables exist.
+				u32.LeBytes(1),                       // 1 exception table
+				u32.LeBytes(1234),                    // call block start 1234
+				u32.LeBytes(5678),                    // landing pad 5678
+				u32.LeBytes(0),                       // 0 exception tables
 			),
 		},
 	}
@@ -156,7 +214,8 @@ func TestDeserializeCompiledModule(t *testing.T) {
 				[]byte{1, 2, 3, 4, 5},       // machine code.
 				crcf([]byte{1, 2, 3, 4, 5}), // machine code.
 				[]byte{0},                   // no source map.
-				u32.LeBytes(0),              // empty catch clause table.
+				[]byte{0},                   // no catch clause table.
+				[]byte{0},                   // no exception tables.
 			),
 			expCompiledModule: &compiledModule{
 				executables:     &executables{executable: []byte{1, 2, 3, 4, 5}},
@@ -180,8 +239,9 @@ func TestDeserializeCompiledModule(t *testing.T) {
 				u64.LeBytes(10),                             // size.
 				[]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},       // machine code.
 				crcf([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}), // crc for machine code.
-				[]byte{0},      // no source map.
-				u32.LeBytes(0), // empty catch clause table.
+				[]byte{0}, // no source map.
+				[]byte{0}, // no catch clause table.
+				[]byte{0}, // no exception tables.
 			),
 			importedFunctionCount: 1,
 			expCompiledModule: &compiledModule{
@@ -290,12 +350,7 @@ func TestDeserializeCompiledModule(t *testing.T) {
 				[]byte{1, 2, 3, 4, 5},       // machine code.
 				crcf([]byte{1, 2, 3, 4, 5}), // crc for machine code.
 			),
-			expCompiledModule: &compiledModule{
-				executables:     &executables{executable: []byte{1, 2, 3, 4, 5}},
-				functionOffsets: []int{0},
-			},
-			expStaleCache: false,
-			expErr:        "compilationcache: error reading source map presence: EOF",
+			expErr: "compilationcache: error reading source map presence: EOF",
 		},
 	}
 

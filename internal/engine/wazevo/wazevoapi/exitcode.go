@@ -30,23 +30,18 @@ const (
 	ExitCodeMemoryWait64
 	ExitCodeMemoryNotify
 	ExitCodeUnalignedAtomic
-	// ExitCodeThrowAlloc is an exit code for starting a throw: it records the raise and
-	// returns a params buffer sized to the tag, for compiled code to store the params into.
+	// ExitCodeThrowAlloc is an exit code for allocating the heap Exception object on throw.
 	ExitCodeThrowAlloc
-	// ExitCodeThrow is the shared throw/throw_ref exit code.
-	// The exnref is passed on the stack, and is zero for a throw, whose exception
-	// the throw-alloc exit has already recorded. The handler searches for a
-	// matching catch clause and restores the stack checkpoint.
-	ExitCodeThrow
+	// ExitCodeMatchException is an exit code for matching the in-flight exception against a try_table's catch clauses.
+	ExitCodeMatchException
 	// ExitCodeNullReference is an exit code for a null reference trap (throw_ref with null exnref).
 	ExitCodeNullReference
-	// ExitCodeTryTableEnter is an exit code for entering a try_table block.
-	// The catch clause info is encoded in the upper bits. The dispatch loop
-	// saves the current SP/FP/returnAddress as a try handler checkpoint.
-	ExitCodeTryTableEnter
-	// ExitCodeTryTableLeave is an exit code for leaving a try_table block.
-	// The dispatch loop pops the most recent try handler.
-	ExitCodeTryTableLeave
+	// ExitCodeThrow is an exit code for propagating an exception out of the current function.
+	ExitCodeThrow
+	// ExitCodeRaiseRef is an exit code for throw_ref: it resolves the exnref guest code is
+	// raising and records it as the exception in flight, which every raise does before
+	// transferring control.
+	ExitCodeRaiseRef
 	// ExitCodeExnrefSlotFill is an exit code for the write barrier over a run of
 	// exnref-typed table slots, which table.fill writes.
 	ExitCodeExnrefSlotFill
@@ -120,6 +115,8 @@ func (e ExitCode) String() string {
 		return "memory_wait32"
 	case ExitCodeMemoryWait64:
 		return "memory_wait64"
+	case ExitCodeRaiseRef:
+		return "raise_ref"
 	case ExitCodeExnrefSlotFill:
 		return "exnref_slot_fill"
 	case ExitCodeExnrefSlotCopy:
@@ -134,14 +131,12 @@ func (e ExitCode) String() string {
 		return "memory_notify"
 	case ExitCodeThrowAlloc:
 		return "throw_alloc"
+	case ExitCodeMatchException:
+		return "match_exception"
 	case ExitCodeNullReference:
 		return "null_reference"
 	case ExitCodeThrow:
 		return "throw"
-	case ExitCodeTryTableEnter:
-		return "try_table_enter"
-	case ExitCodeTryTableLeave:
-		return "try_table_leave"
 	}
 	panic("TODO")
 }
@@ -162,10 +157,4 @@ func ExitCodeCallGoFunctionWithIndex(index int, withListener bool) ExitCode {
 
 func GoFunctionIndexFromExitCode(exitCode ExitCode) int {
 	return int(exitCode >> 8)
-}
-
-// TryTableIDFromExitCode extracts the try-table ID from an ExitCodeTryTableEnter
-// exit code. Uses the same encoding as GoFunctionIndexFromExitCode (upper 24 bits).
-func TryTableIDFromExitCode(exitCode ExitCode) int {
-	return GoFunctionIndexFromExitCode(exitCode)
 }

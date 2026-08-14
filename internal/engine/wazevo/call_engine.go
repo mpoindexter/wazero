@@ -1,6 +1,7 @@
 package wazevo
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"reflect"
@@ -52,46 +53,6 @@ type (
 		// thrown is the raise this call is propagating, and is nil when it is not
 		// propagating one. A call that never throws never allocates it.
 		thrown *thrownException
-		// tryHandlers is the stack of active try_table exception handlers, used to find the
-		// one that catches a raise.
-		tryHandlers []tryHandler
-	}
-
-	// tryHandler records the state at a try_table entry for exception handling.
-	// On match, we restore the stack to the checkpoint state and re-enter at returnAddress.
-	tryHandler struct {
-		// Cloned stack and state from the try_table entry checkpoint,
-		// using the same approach as experimental.Snapshot.
-		sp, fp, top    uintptr
-		returnAddress  *byte
-		savedRegisters [64][2]uint64
-		stack          []byte // cloned stack
-		// catchClauses describes what exceptions this handler catches.
-		catchClauses []wazevoapi.CatchClauseInstance
-		// localsSaveArea is a heap buffer where locals are mirrored inside
-		// try bodies. Handlers read from it to get updated values.
-		// Nil for nested same-function try_tables that reuse the enclosing
-		// handler's save area.
-		localsSaveArea []uint64
-		// moduleInstance is the module that set up this try handler.
-		// Used for tag matching in doHandleException (the tag index in
-		// catch clauses is relative to this module's tag index space).
-		moduleInstance *wasm.ModuleInstance
-		// heldExceptions is the reference table as it was here. Rewinding to this
-		// checkpoint restores the operand stack and locals, so it has to restore what they
-		// held too -- which is how a raise releases the references of every frame and slot
-		// it discards, including those of frames it passes clean through, whose compiled
-		// code never runs again to release anything itself.
-		heldExceptions map[wasm.Reference]*exceptionRefs
-		// exnrefLocals and effectiveSaveArea say where the exnref locals a handler will
-		// carry across the rewind are. Those values outlive it while the references they
-		// held do not, so the rewind takes new ones for them. See restoreCheckpoint.
-		exnrefLocals      []uint32
-		effectiveSaveArea []uint64
-		// frameDepth is how many wasm frames were on the stack here. Catching unwinds
-		// whatever is above that, which is what says how many frames a raise took -- and so
-		// which listeners have to be told.
-		frameDepth int
 	}
 
 	// exceptionRefs is an exception and the number of references to it in this call. The table
@@ -165,21 +126,29 @@ type (
 		memoryWait64TrampolineAddress *byte
 		// memoryNotifyTrampolineAddress holds the address of the memory_notify trampoline function.
 		memoryNotifyTrampolineAddress *byte
-		// throwAllocTrampolineAddress holds the address of the throw-alloc trampoline:
-		// phase 1 of throw, which records the raise and returns the params buffer.
-		throwAllocTrampolineAddress *byte
-		// throwTrampolineAddress holds the address of the throw/throw_ref trampoline function.
-		throwTrampolineAddress *byte
-		// tryTableEnterTrampolineAddress holds the address of the try_table enter trampoline function.
-		tryTableEnterTrampolineAddress *byte
-		// tryTableLeaveTrampolineAddress holds the address of the try_table leave trampoline function.
-		tryTableLeaveTrampolineAddress *byte
+		// allocExceptionTrampolineAddress holds the address of the allocate-exception
+		// trampoline, called when a throw executes to start the raise and return a params
+		// buffer sized to the tag.
+		allocExceptionTrampolineAddress *byte
+		// matchExceptionTrampolineAddress holds the address of the matchException
+		// trampoline, called from a try_table dispatch block to match the in-flight
+		// exception against that try_table's catch clauses.
+		matchExceptionTrampolineAddress *byte
+		// propagateExceptionTrampolineAddress holds the address of the propagate-exception
+		// trampoline, called from a function's propagate path to overwrite this frame's
+		// saved return address with the caller's landing pad, so the frame's ordinary
+		// return unwinds the exception one level into the handler (see ExitCodeThrow).
+		propagateExceptionTrampolineAddress *byte
 		// exnrefSlotLoadTrampolineAddress and exnrefSlotStoreTrampolineAddress hold the
 		// addresses of the barriers an exnref-typed global or table slot is accessed
 		// through. Compiled code passes the address of the slot and lets the runtime do the
 		// access itself, so that it cannot race another barrier on the same slot.
 		exnrefSlotLoadTrampolineAddress  *byte
 		exnrefSlotStoreTrampolineAddress *byte
+		// raiseRefTrampolineAddress holds the address of the throw_ref trampoline, which
+		// records the exception guest code is raising as the one in flight. A throw does
+		// this in the allocate-exception trampoline instead.
+		raiseRefTrampolineAddress *byte
 		// exnrefSlotFillTrampolineAddress and exnrefSlotCopyTrampolineAddress hold the
 		// addresses of the barriers over a run of exnref-typed table slots, which the bulk
 		// table operations write.
@@ -189,24 +158,14 @@ type (
 		// calls to adjust this call's exnref reference counts.
 		adjustExnrefsTrampolineAddress *byte
 		// caughtExceptionParams points at the params of the exception a handler was just
-		// entered for. The raise trampoline sets it; the handler loads the values out of it
-		// and nothing reads it after that, so the next raise is free to overwrite it.
+		// entered for. matchException sets it; the handler loads the values out of it and
+		// nothing reads it after that, so the next match is free to overwrite it.
 		//
 		// Its purpose is to be a Go pointer: compiled code reads the params through this
 		// address, and the field being pointer-typed is what keeps the array from being
 		// collected while it does -- a pointer to an object's first word keeps the whole
 		// object alive.
 		caughtExceptionParams *uint64
-		// caughtExceptionRef holds the handle naming the exception a handler was just
-		// entered for, which catch_ref and catch_all_ref hand to guest code as an exnref.
-		caughtExceptionRef uintptr
-		// caughtExceptionClauseIdx is -1 on the normal path through a try_table entry, and
-		// the matched catch clause index when a raise re-enters one. Compiled code reads it
-		// to decide which handler to dispatch to.
-		caughtExceptionClauseIdx int64
-		// localsSaveAreaPtr points to the tryHandler's localsSaveArea slice
-		// backing array. Handlers load locals from this slice.
-		localsSaveAreaPtr uintptr
 	}
 )
 
@@ -371,39 +330,22 @@ func (c *callEngine) holdParamRefs(exn *wasm.Exception) {
 // that an exception is unwinding its frame. Compiled code calls the after-listener on the
 // return paths, which a frame an exception takes out never reaches.
 func (c *callEngine) abortListenerOf(ctx context.Context, addr uintptr) {
-	me := c.moduleEngineOfAddr(addr)
-	if me == nil {
-		return
+	// Unwinding runs this per frame, so try the module the call is running in first: a
+	// range check rather than a search over everything the engine holds.
+	cm := c.parent.parent
+	if !checkAddrInBytes(addr, cm.executable) {
+		if cm = c.parent.parent.parent.compiledModuleOfAddr(addr); cm == nil {
+			return
+		}
 	}
-	cm := me.parent
 	if len(cm.listeners) == 0 {
 		return
 	}
 	index := cm.functionIndexOf(addr)
+	def := cm.module.FunctionDefinition(cm.module.ImportFunctionCount + index)
 	if lsn := cm.listeners[index]; lsn != nil {
-		def := cm.module.FunctionDefinition(cm.module.ImportFunctionCount + index)
-		lsn.Abort(ctx, me.module, def, experimental.ErrUnwoundByException)
+		lsn.Abort(ctx, c.callerModuleInstance(), def, experimental.ErrUnwoundByException)
 	}
-}
-
-// moduleEngineOfAddr is the module engine whose executable holds addr, which says both what
-// function the frame is in and which instance it belongs to -- a listener is told the module
-// the function it is watching is in, not the one the exception came from.
-//
-// The search is over the instances this call can reach: the one it is running in, and the
-// ones it imports from, which between them cover the frames a call can have. Unwinding runs
-// this per frame, so it is a couple of range checks rather than a search over everything the
-// engine holds.
-func (c *callEngine) moduleEngineOfAddr(addr uintptr) *moduleEngine {
-	if checkAddrInBytes(addr, c.parent.parent.executable) {
-		return c.parent
-	}
-	for i := range c.parent.importedFunctions {
-		if me := c.parent.importedFunctions[i].me; checkAddrInBytes(addr, me.parent.executable) {
-			return me
-		}
-	}
-	return nil
 }
 
 func (c *callEngine) addFrame(builder wasmdebug.ErrorBuilder, addr uintptr) (def api.FunctionDefinition, listener experimental.FunctionListener) {
@@ -481,9 +423,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 
 	// Clear any stale in-flight exception state from a previous call.
 	c.thrown = nil
-	c.tryHandlers = c.tryHandlers[:0]
 	c.execCtx.caughtExceptionParams = nil
-	c.execCtx.caughtExceptionRef, c.execCtx.localsSaveAreaPtr = 0, 0
 	clear(c.heldExceptions)
 
 	var paramResultPtr *uint64
@@ -514,11 +454,10 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			// An uncaught exception, as opposed to a trap, which aborts on the live stack.
 			if t := c.thrown; t != nil {
 				trace := t.trace
-				// Uncaught. The frames are still live here, but the trace captured at the
-				// raise is what the frames it already unwound are recorded in, and it is the
-				// same stack either way. These frames get no listener notification: each was
-				// aborted as it was unwound.
-				for _, retAddr := range trace {
+				// Uncaught: it unwound the stack on its way out, so walking it now would
+				// read dead frames. Replay what was captured at the raise. These frames get
+				// no listener notification: each was aborted as it was unwound.
+				for _, retAddr := range trace[:len(trace)-1] {
 					c.addFrame(builder, retAddr)
 				}
 				// Thrown somewhere other than where it was last thrown: say both. These
@@ -531,7 +470,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 				}
 				if len(origin) > 0 && !slices.Equal(origin, trace) {
 					builder.StartSection(wasmdebug.ExceptionOriginSection)
-					for _, retAddr := range origin {
+					for _, retAddr := range origin[:len(origin)-1] {
 						c.addFrame(builder, retAddr)
 					}
 				}
@@ -542,7 +481,6 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 					c.execCtx.framePointerBeforeGoCall,
 					c.stackTop,
 					nil,
-					wasmdebug.MaxFrames,
 				)
 				if len(returnAddrs) > 1 {
 					for _, retAddr := range returnAddrs[:len(returnAddrs)-1] { // the last return addr is the trampoline, so we skip it.
@@ -591,6 +529,19 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 	for {
 		switch ec := c.execCtx.exitCode; ec & wazevoapi.ExitCodeMask {
 		case wazevoapi.ExitCodeOK:
+			if c.thrown != nil {
+				// The top-level function returned while an exception was still in flight
+				// (no enclosing handler matched): it is uncaught. The wasm stack has
+				// already been unwound by the propagating returns, so the saved stack
+				// pointer now describes dead frames -- clear it so the abort handler
+				// cannot walk them, and let it use the raise trace, captured while they were
+				// still live.
+				//
+				// The raise stays set through the panic so the abort handler can still say
+				// where the exception came from; the deferred cleanup clears it.
+				c.execCtx.stackPointerBeforeGoCall = nil
+				panic(wasmruntime.ErrRuntimeUncaughtException)
+			}
 			return nil
 		case wazevoapi.ExitCodeGrowStack:
 			oldsp := uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall))
@@ -837,7 +788,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			tagIndex := int(s[0])
 			mod := c.callerModuleInstance()
 			tag := mod.Tags[tagIndex]
-			trace := c.liveFrames()
+			trace := unwindStack(uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall, c.stackTop, nil)
 			t := &thrownException{tag: tag, trace: trace}
 			if n := len(tag.Type.Params); n > 0 {
 				t.params = make([]uint64, n)
@@ -847,94 +798,130 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
-		case wazevoapi.ExitCodeThrow:
-			// Throw trampoline: (execCtx, exnref) → ().
-			// A throw_ref passes what it is raising, which only this call can resolve; a
-			// throw passes zero, its raise having been recorded by the throw-alloc trampoline
-			// already.
+		case wazevoapi.ExitCodeMatchException:
+			// matchException trampoline: (execCtx, tryTableID) → (clauseIdx, exnref).
+			// Reached from a compiled try_table dispatch block while an exception is in
+			// flight. Matches the exception the runtime has in flight against
+			// the named try_table's catch clauses, using the catching module's tag space,
+			// and returns both the matched clause index (which the compiled dispatch block
+			// feeds to its br_table) and the exnref (which the matched handler consumes)
+			// via the go-call result slots. No stack unwinding happens here: propagation
+			// across frames is done by compiled code via normal returns.
 			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
-			if handle := wasm.Reference(s[0]); handle != 0 {
-				exn := c.heldException(handle)
-				if exn == nil {
-					// One this call cannot reach, such as a handle host code kept from an
-					// earlier call.
-					panic(wasmruntime.ErrRuntimeExpiredExceptionRef)
-				}
-				// This raise starts here, not where the exception was first thrown, which
-				// exn.Origin still has.
-				c.thrown = &thrownException{
-					tag: exn.Tag, params: exn.Params, rethrown: exn, trace: c.liveFrames(),
-				}
-				// The raise consumes the operand. The exception stays alive through c.thrown,
-				// and a handler that catches it takes a fresh reference.
-				c.releaseIfHeld(handle)
-			}
-			// Search for a matching catch clause and rewind to its checkpoint, so compiled
-			// code resumes at that try_table's entry with the matched clause index.
-			if !c.doHandleException(ctx) {
-				// Uncaught, so the raise takes every live frame rather than stopping below
-				// a handler. The error the recover path builds is a separate thing from
-				// this: a frame is aborted because the exception unwound it, whether or not
-				// anything catches it further out.
-				c.notifyUnwound(ctx, c.thrown.trace)
-				panic(wasmruntime.ErrRuntimeUncaughtException)
-			}
-			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
-				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
-		case wazevoapi.ExitCodeNullReference:
-			panic(wasmruntime.ErrRuntimeNullReference)
-		case wazevoapi.ExitCodeTryTableEnter:
-			// Save current state as a try handler checkpoint using stack cloning
-			// (same approach as experimental.Snapshot).
-			// The encoded exit code (with tryTableID in upper bits) is on the
-			// Go call stack as the second trampoline argument, not in execCtx.exitCode.
-			tryTableEnterStack := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
-			tryTableID := wazevoapi.TryTableIDFromExitCode(wazevoapi.ExitCode(tryTableEnterStack[0]))
+			localFnIdx, ordinal := wazevoapi.TryTableIDParts(s[0])
 			mod := c.callerModuleInstance()
 			me := mod.Engine.(*moduleEngine)
-			info := &me.parent.tryTableInfo[tryTableID]
-			returnAddress := c.execCtx.goCallReturnAddress
-			oldTop, oldSp := c.stackTop, uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall))
-			newSP, newFP, newTop, newStack := c.cloneStack(uintptr(len(c.stack)) + 16)
-			adjustClonedStack(oldSp, oldTop, newSP, newFP, newTop)
-
-			// Allocate a heap buffer for locals so handlers can read throw-time values.
-			// Nested try_tables in the same function (ReuseLocals) share the enclosing handler's save area.
-			var saveArea []uint64
-			if info.NumLocals > 0 && !info.ReuseLocals {
-				saveArea = make([]uint64, info.NumLocals*2) // 16 bytes per local
-				c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&saveArea[0]))
+			info := &me.parent.tryTableInfo[localFnIdx][ordinal]
+			t := c.thrown
+			clauseIdx := int64(-1)
+			for i := range info.CatchClauses {
+				clause := &info.CatchClauses[i]
+				matched := false
+				switch clause.Kind {
+				case wasm.CatchKindCatch, wasm.CatchKindCatchRef:
+					matched = mod.Tags[clause.TagIndex] == t.tag
+				case wasm.CatchKindCatchAll, wasm.CatchKindCatchAllRef:
+					matched = true
+				}
+				if matched {
+					clauseIdx = int64(i)
+					break
+				}
 			}
-
-			c.tryHandlers = append(c.tryHandlers, tryHandler{
-				sp:                newSP,
-				fp:                newFP,
-				top:               newTop,
-				returnAddress:     returnAddress,
-				savedRegisters:    c.execCtx.savedRegisters,
-				stack:             newStack,
-				catchClauses:      info.CatchClauses,
-				moduleInstance:    mod,
-				localsSaveArea:    saveArea,
-				effectiveSaveArea: c.effectiveSaveArea(saveArea),
-				exnrefLocals:      info.ExnrefLocals,
-				heldExceptions:    c.cloneHeldExceptions(),
-				frameDepth:        len(c.liveFrames()),
-			})
-			// Set clauseIdx = -1 (no exception) in execCtx for the compiled code
-			// to read after the trampoline returns.
-			c.execCtx.caughtExceptionClauseIdx = -1
+			var handle wasm.Reference
+			if clauseIdx >= 0 {
+				// Caught: build the exception if this clause hands anything to guest code,
+				// since what it hands over -- params to read, a handle to throw again --
+				// outlives the raise.
+				switch info.CatchClauses[clauseIdx].Kind {
+				case wasm.CatchKindCatch:
+					if len(t.params) > 0 {
+						exn := c.exceptionOf(t)
+						c.execCtx.caughtExceptionParams = unsafe.SliceData(exn.Params)
+						c.holdParamRefs(exn)
+					}
+				case wasm.CatchKindCatchRef:
+					exn := c.exceptionOf(t)
+					c.execCtx.caughtExceptionParams = unsafe.SliceData(exn.Params)
+					c.holdParamRefs(exn)
+					c.holdException(exn)
+					handle = exn.ID
+				case wasm.CatchKindCatchAllRef:
+					exn := c.exceptionOf(t)
+					c.holdException(exn)
+					handle = exn.ID
+				case wasm.CatchKindCatchAll:
+					// Hands over nothing, so nothing needs to outlive the raise.
+				}
+				// This raise is over -- whatever outlives it belongs to the exception by
+				// now -- and a later throw_ref is a new one with its own stack.
+				if t.rethrown == nil {
+					// A fresh throw, so this raise held the references its exnref params
+					// name. exceptionOf, if a clause above wanted them, has already put the
+					// exceptions they name in ParamRefs, which is what keeps them reachable
+					// from here on.
+					for i, vt := range t.tag.Type.Params {
+						if wasm.IsExnref(vt) {
+							c.releaseIfHeld(wasm.Reference(t.params[i]))
+						}
+					}
+				}
+				c.thrown = nil
+			}
+			// Return the matched clause index and the exnref via the go-call result slots.
+			// The handle is zero unless the matched clause hands one over; a handler that
+			// takes params reads them through execCtx.caughtExceptionParams instead.
+			s[0] = uint64(clauseIdx)
+			s[1] = uint64(handle)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
-		case wazevoapi.ExitCodeTryTableLeave:
-			// Pop the most recent try handler and restore the locals save
-			// area pointer from the handler below (or clear it).
-			if len(c.tryHandlers) > 0 {
-				c.tryHandlers = c.tryHandlers[:len(c.tryHandlers)-1]
-				c.restoreLocalsSaveAreaPtr(len(c.tryHandlers) - 1)
+		case wazevoapi.ExitCodeThrow:
+			// Unwind the in-flight exception one frame: redirect the propagating frame's
+			// return into its caller's exception handler. We overwrite the frame's saved
+			// return address with the landing-pad PC for the call site it returns to, so
+			// its ordinary return lands in the handler instead of the normal continuation.
+			sp := uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall))
+			fp := c.execCtx.framePointerBeforeGoCall
+			// The frame this runs for leaves without returning, which is what Abort reports.
+			// It fires here rather than where the exception comes to rest, since the frame
+			// is gone either way.
+			c.abortListenerOf(ctx, goCallerReturnAddr(sp, fp))
+			retAddr := returnAddrAt(sp, fp) // where the propagating frame returns into its caller.
+			eng := c.parent.parent.parent
+			if cm := eng.compiledModuleOfAddr(retAddr); cm != nil {
+				fnIdx := cm.functionIndexOf(retAddr)
+				base := uintptr(unsafe.Pointer(&cm.executable[0])) + uintptr(cm.functionOffsets[fnIdx])
+				if rel, ok := findLandingPad(cm.exceptionTables[fnIdx], uint32(retAddr-base)-1); ok {
+					setReturnAddrAt(sp, fp, base+uintptr(rel)) // the frame's ret now goes to the handler.
+				}
+				// else: this call site has no handler because the caller is the entry
+				// trampoline — the exception escaped the outermost wasm frame. Leaving the
+				// return address makes the frame return to the entry, where the still-
+				// pending exception becomes ErrRuntimeUncaughtException.
 			}
+			c.execCtx.exitCode = wazevoapi.ExitCodeOK
+			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr, sp, fp)
+		case wazevoapi.ExitCodeRaiseRef:
+			// throw_ref trampoline: (execCtx, exnref). Records what guest code is raising
+			// as the exception in flight, which every raise does before transferring
+			// control -- a throw does it in the allocate-exception trampoline instead.
+			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
+			exn := c.heldException(wasm.Reference(s[0]))
+			if exn == nil {
+				// One this call cannot reach, such as a handle host code kept from an
+				// earlier call.
+				panic(wasmruntime.ErrRuntimeExpiredExceptionRef)
+			}
+			// This raise starts here, not where the exception was first thrown, which
+			// exn.Origin still has.
+			trace := unwindStack(uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall, c.stackTop, nil)
+			c.thrown = &thrownException{
+				tag: exn.Tag, params: exn.Params, rethrown: exn, trace: trace,
+			}
+			// The raise consumes the operand. The exception stays alive through c.thrown, and
+			// a handler that catches it takes a fresh reference.
+			c.releaseIfHeld(wasm.Reference(s[0]))
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
@@ -1009,195 +996,32 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
+		case wazevoapi.ExitCodeNullReference:
+			panic(wasmruntime.ErrRuntimeNullReference)
 		default:
 			panic("BUG")
 		}
 	}
 }
 
-// doHandleException finds the handler that catches the raise now in flight and rewinds
-// execution to its checkpoint, so compiled code resumes at that try_table's entry with the
-// matched clause index. It reports whether one was found; if none was, the exception is
-// uncaught and this call is over.
-//
-// Handlers are searched innermost first, and their clauses in order, which is the order the
-// spec gives them.
-func (c *callEngine) doHandleException(ctx context.Context) bool {
-	t := c.thrown
-	for i := len(c.tryHandlers) - 1; i >= 0; i-- {
-		h := &c.tryHandlers[i]
-		for clauseIdx := range h.catchClauses {
-			clause := &h.catchClauses[clauseIdx]
-			// The clause's tag index is in the tag space of the module that set the handler
-			// up, not of the one that threw.
-			matched := false
-			switch clause.Kind {
-			case wasm.CatchKindCatch, wasm.CatchKindCatchRef:
-				matched = h.moduleInstance.Tags[clause.TagIndex] == t.tag
-			case wasm.CatchKindCatchAll, wasm.CatchKindCatchAllRef:
-				matched = true
-			}
-			if !matched {
-				continue
-			}
-
-			// Build the exception if this clause hands anything to guest code, since what it
-			// hands over -- params to read, a handle to throw again -- outlives the raise.
-			// This has to happen before the reference table is rewound: the exnref params of
-			// a raise are resolved through what the raising frames held, which the rewind
-			// undoes.
-			var exn *wasm.Exception
-			switch clause.Kind {
-			case wasm.CatchKindCatch:
-				if len(t.params) > 0 {
-					exn = c.exceptionOf(t)
-				}
-			case wasm.CatchKindCatchRef, wasm.CatchKindCatchAllRef:
-				exn = c.exceptionOf(t)
-			case wasm.CatchKindCatchAll:
-				// Hands over nothing, so nothing needs to outlive the raise.
-			}
-
-			// Everything above the frame this handler belongs to leaves the stack without
-			// returning, which is what Abort reports.
-			if unwound := len(t.trace) - h.frameDepth; unwound > 0 {
-				c.notifyUnwound(ctx, t.trace[:unwound])
-			}
-
-			// Restore localsSaveAreaPtr from the matched handler or
-			// the nearest enclosing one (same-function reuse).
-			c.restoreLocalsSaveAreaPtr(i)
-
-			// Pop all handlers at and above this one.
-			c.tryHandlers = c.tryHandlers[:i]
-
-			// The rewind puts the reference counts back the way they were at this
-			// try_table's entry, which is what releases everything the raise discarded.
-			previous := c.heldExceptions
-			c.heldExceptions, h.heldExceptions = h.heldExceptions, nil
-			c.adoptSaveAreaExnrefs(h, previous)
-
-			// Restore the cloned stack (like snapshot.doRestore).
-			spp := *(**uint64)(unsafe.Pointer(&h.sp))
-			c.stack = h.stack
-			c.stackTop = h.top
-			ec := &c.execCtx
-			ec.stackBottomPtr = &c.stack[0]
-			ec.stackPointerBeforeGoCall = spp
-			ec.framePointerBeforeGoCall = h.fp
-			ec.goCallReturnAddress = h.returnAddress
-			ec.savedRegisters = h.savedRegisters
-
-			// Then take the references for what this clause is about to hand over, which
-			// the frame this handler belongs to is the one holding from here on.
-			switch clause.Kind {
-			case wasm.CatchKindCatch:
-				if exn != nil {
-					c.execCtx.caughtExceptionParams = unsafe.SliceData(exn.Params)
-					c.holdParamRefs(exn)
-				}
-			case wasm.CatchKindCatchRef:
-				c.execCtx.caughtExceptionParams = unsafe.SliceData(exn.Params)
-				c.holdParamRefs(exn)
-				c.holdException(exn)
-				c.execCtx.caughtExceptionRef = uintptr(exn.ID)
-			case wasm.CatchKindCatchAllRef:
-				c.holdException(exn)
-				c.execCtx.caughtExceptionRef = uintptr(exn.ID)
-			}
-
-			// The raise is over -- whatever outlives it belongs to the exception by now --
-			// and a later throw_ref is a new one with its own stack.
-			c.thrown = nil
-			c.execCtx.caughtExceptionClauseIdx = int64(clauseIdx)
-			return true
-		}
-	}
-	return false
-}
-
-// restoreLocalsSaveAreaPtr walks tryHandlers from index `from` downward
-// and sets localsSaveAreaPtr to the first handler that owns a save area,
-// or clears it if none is found.
-func (c *callEngine) restoreLocalsSaveAreaPtr(from int) {
-	for i := from; i >= 0; i-- {
-		if sa := c.tryHandlers[i].localsSaveArea; len(sa) > 0 {
-			c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&sa[0]))
-			return
-		}
-	}
-	c.execCtx.localsSaveAreaPtr = 0
-}
-
 func (c *callEngine) callerModuleInstance() *wasm.ModuleInstance {
 	return moduleInstanceFromOpaquePtr(c.execCtx.callerModuleContextPtr)
 }
 
-// effectiveSaveArea is the buffer a try_table's handlers read the locals out of: its own
-// when it allocated one, and otherwise the enclosing try_table's, which a nested one in the
-// same function shares.
-func (c *callEngine) effectiveSaveArea(own []uint64) []uint64 {
-	if len(own) > 0 {
-		return own
+// findLandingPad returns the table-driven-EH landing-pad offset for a (function-
+// relative) program counter: the entry whose CallBlockStart is the greatest <= relPC.
+// The table is sorted by CallBlockStart. relPC should be (returnAddr - funcBase - 1)
+// so it falls inside the call instruction's block regardless of fallthrough.
+func findLandingPad(tbl []wazevoapi.ExceptionTableEntry, relPC uint32) (uint32, bool) {
+	idx, exact := slices.BinarySearchFunc(tbl, relPC,
+		func(e wazevoapi.ExceptionTableEntry, pc uint32) int { return cmp.Compare(e.CallBlockStart, pc) })
+	if !exact {
+		idx-- // the search landed where relPC would go, so the entry before it is the one covering it.
 	}
-	for i := len(c.tryHandlers) - 1; i >= 0; i-- {
-		if sa := c.tryHandlers[i].localsSaveArea; len(sa) > 0 {
-			return sa
-		}
+	if idx < 0 {
+		return 0, false
 	}
-	return nil
-}
-
-// adoptSaveAreaExnrefs is half of what a catch does to the reference count of an exnref
-// local. The local ends up holding what it held at the throw, which the save area carries
-// across the rewind -- but the rewind put the count back to what it was at the try_table's
-// entry, which is a count of what the local held *there*. So the two differ by a swap: out
-// with the value the rewind restored, in with the one the save area names.
-//
-// This is the in. It has to be here because `previous`, the table as it was at the raise, is
-// the last place a reference to the save area's handle still exists. The out is emitted into
-// the handler by the compiler (see reloadLocalsFromSaveArea), which is the only place the
-// value the rewind restored is known. Neither half is conditional on the two being different
-// -- when the local did not change they are the same handle, and the pair cancels.
-func (c *callEngine) adoptSaveAreaExnrefs(h *tryHandler, previous map[wasm.Reference]*exceptionRefs) {
-	for _, localIdx := range h.exnrefLocals {
-		handle := wasm.Reference(h.effectiveSaveArea[localIdx*2])
-		if handle == 0 {
-			continue // `ref.null exn`, which is not counted.
-		}
-		if e := previous[handle]; e != nil {
-			c.holdException(e.exn)
-		}
-	}
-}
-
-// notifyUnwound tells the listener of each of the given frames that an exception took it off
-// the stack.
-func (c *callEngine) notifyUnwound(ctx context.Context, unwound []uintptr) {
-	for _, addr := range unwound {
-		c.abortListenerOf(ctx, addr)
-	}
-}
-
-// liveFrames is the address of every live wasm frame, innermost first, as of an exit to Go
-// through one of the shared trampolines. Each address is inside the function whose frame it
-// stands for, which is what identifies it.
-//
-// The trampoline has a frame of its own, so the first return address unwinding reports is
-// already the innermost wasm frame; the last is the entry trampoline rather than a wasm
-// frame, so it is dropped.
-func (c *callEngine) liveFrames() []uintptr {
-	retAddrs := unwindStack(
-		uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)),
-		c.execCtx.framePointerBeforeGoCall,
-		c.stackTop,
-		nil,
-		0, // Every frame: a listener has to be told about each one the exception unwinds.
-	)
-	if len(retAddrs) == 0 {
-		return nil
-	}
-	return retAddrs[:len(retAddrs)-1]
+	return tbl[idx].LandingPad, true
 }
 
 const callStackCeiling = uintptr(50000000) // in uint64 (8 bytes) == 400000000 bytes in total == 400mb.
@@ -1280,7 +1104,7 @@ func (si *stackIterator) reset(c *callEngine, onHostCall bool) {
 	} else {
 		si.retAddrs = si.retAddrs[:0]
 	}
-	si.retAddrs = unwindStack(uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall, c.stackTop, si.retAddrs, wasmdebug.MaxFrames)
+	si.retAddrs = unwindStack(uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall, c.stackTop, si.retAddrs)
 	si.retAddrs = si.retAddrs[:len(si.retAddrs)-1] // the last return addr is the trampoline, so we skip it.
 	si.retAddrCursor = 0
 	si.eng = c.parent.parent.parent

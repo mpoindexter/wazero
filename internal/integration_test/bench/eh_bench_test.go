@@ -13,23 +13,23 @@ import (
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
 
-// BenchmarkEH measures wasm exception handling in the wazevo compiler along the axes
-// its cost divides into: what a try_table costs when nothing throws, how that scales
-// with nesting, and what a throw costs as a function of how far it propagates.
+// BenchmarkEH measures wasm exception handling in the wazevo compiler across the
+// axes that matter for the table-driven design: try_table enter/leave on the hot
+// (no-throw) path, try_table nesting depth, and throw-propagation depth.
 //
 // Each shape runs an inner loop of `ehInner` iterations per call, so the reported
 // ns/iter excludes the Go->wasm call overhead.
 //
-// The no-throw shapes are the ones that matter most, since they are what every program
-// using exceptions pays whether or not it ever throws:
+// No-throw shapes (a try_table's enter/leave emits no normal-path instruction under
+// the table-driven design, so these should stay cheap and ~flat with nesting depth):
 //   - enter_leave:     one catch-bearing try_table entered+left per iteration.
 //   - nested_no_throw: ehDepth try_tables nested in one frame, entered+left per iter.
 //   - try_call:        a try_table wrapping a real wasm call (realistic shape).
 //
-// The throw shapes are the rare path, split so that the fixed cost of a raise can be
-// told apart from what each frame it passes through adds:
+// Throw shapes (rare path; each throw allocates one Exception heap object):
 //   - same_frame_throw: throw and catch within a single frame — cheapest round-trip.
-//   - throw_deep:       throw caught ehDepth call frames above.
+//   - throw_deep:       throw caught ehDepth call frames above, isolating the
+//     per-frame propagation cost (each frame is one propagate-trampoline Go exit).
 func BenchmarkEH(b *testing.B) {
 	if !platform.CompilerSupported() {
 		b.Skip()

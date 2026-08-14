@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/tetratelabs/wazero/internal/engine/wazevo/wazevoapi"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 )
 
@@ -65,4 +66,33 @@ func TestCallEngine_requiredInitialStackSize(t *testing.T) {
 	require.Equal(t, 10240, c.requiredInitialStackSize())
 	c.sizeOfParamResultSlice = 1000
 	require.Equal(t, 1000*16+32+16, c.requiredInitialStackSize())
+}
+
+func Test_findLandingPad(t *testing.T) {
+	tbl := []wazevoapi.ExceptionTableEntry{
+		{CallBlockStart: 10, LandingPad: 100},
+		{CallBlockStart: 20, LandingPad: 200},
+		{CallBlockStart: 30, LandingPad: 300},
+	}
+	for _, tc := range []struct {
+		name  string
+		tbl   []wazevoapi.ExceptionTableEntry
+		relPC uint32
+		pad   uint32
+		ok    bool
+	}{
+		{"empty table", nil, 0, 0, false},
+		{"before the first entry", tbl, 9, 0, false},
+		{"exactly the first entry", tbl, 10, 100, true},
+		{"inside the first entry", tbl, 19, 100, true},
+		{"exactly a middle entry", tbl, 20, 200, true},
+		{"exactly the last entry", tbl, 30, 300, true},
+		{"past the last entry", tbl, 1 << 20, 300, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pad, ok := findLandingPad(tc.tbl, tc.relPC)
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.pad, pad)
+		})
+	}
 }

@@ -33,6 +33,11 @@ type (
 		// DisableStackCheck disables the stack check for the current compilation for debugging/testing.
 		DisableStackCheck()
 
+		// BlockBinaryOffset returns the function-relative executable offset of the given
+		// ssa.BasicBlock, valid after Finalize. Used to build the table-driven-EH
+		// exception table. The block must be one this function laid out.
+		BlockBinaryOffset(id ssa.BasicBlockID) int64
+
 		// SetCurrentABI initializes the FunctionABI for the given signature.
 		SetCurrentABI(abi *FunctionABI)
 

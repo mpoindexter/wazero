@@ -227,6 +227,15 @@ func (m *machine) StartLoweringFunction(maxBlockID ssa.BasicBlockID) {
 	m.nextLabel = label(maxBlockID) + 1
 }
 
+// BlockBinaryOffset implements backend.Machine.
+func (m *machine) BlockBinaryOffset(id ssa.BasicBlockID) int64 {
+	pos := m.labelPositionPool.Get(int(id)) // ssaBlockLabel(sb) == label(sb.ID()).
+	if pos == nil {
+		panic("BUG: no label position for block " + id.String())
+	}
+	return pos.binaryOffset
+}
+
 // LinkAdjacentBlocks implements backend.Machine.
 func (m *machine) LinkAdjacentBlocks(prev, next ssa.BasicBlock) {
 	prevPos, nextPos := m.getOrAllocateSSABlockLabelPosition(prev), m.getOrAllocateSSABlockLabelPosition(next)
@@ -2184,9 +2193,14 @@ func (m *machine) Encode(ctx context.Context) (err error) {
 
 			switch cur.kind {
 			case nop0:
-				l := cur.nop0Label()
-				if pos := m.labelPositionPool.Get(int(l)); pos != nil {
-					pos.binaryOffset = offset
+				// Skip label 0 (the entry block, whose offset is set by the outer loop):
+				// filler nops carry label 0 by default, and stamping the entry block's
+				// binaryOffset from each would corrupt it — which the table-driven-EH
+				// exception table reads when a call sits in the entry block.
+				if l := cur.nop0Label(); l != 0 {
+					if pos := m.labelPositionPool.Get(int(l)); pos != nil {
+						pos.binaryOffset = offset
+					}
 				}
 			case sourceOffsetInfo:
 				m.c.AddSourceOffsetInfo(offset, cur.sourceOffsetInfo())

@@ -128,4 +128,7 @@ func (m mockMachine) Format() string {
 // DisableStackCheck implements Machine.DisableStackCheck.
 func (m mockMachine) DisableStackCheck() {}
 
+// BlockBinaryOffset implements Machine.BlockBinaryOffset.
+func (m mockMachine) BlockBinaryOffset(ssa.BasicBlockID) int64 { return -1 }
+
 var _ Machine = (*mockMachine)(nil)

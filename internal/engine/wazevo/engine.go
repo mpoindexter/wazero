@@ -42,6 +42,9 @@ type (
 		// setFinalizer defaults to runtime.SetFinalizer, but overridable for tests.
 		setFinalizer func(obj interface{}, finalizer interface{})
 
+		// enabledFeatures stores the features that were enabled for this engine
+		enabledFeatures api.CoreFeatures
+
 		// The followings are reused for compiling shared functions.
 		machine backend.Machine
 		be      backend.Compiler
@@ -71,21 +74,26 @@ type (
 		memoryWait64Address *byte
 		// memoryNotifyAddress is the address of memory.notify builtin function
 		memoryNotifyAddress *byte
-		// throwAllocTrampolineAddress is the address of the throw-alloc trampoline:
-		// phase 1 of throw, which records the raise and returns the params buffer.
-		throwAllocTrampolineAddress *byte
-		// throwTrampolineAddress is the address of the throw/throw_ref trampoline function.
-		throwTrampolineAddress *byte
-		// tryTableEnterAddress is the address of try_table enter trampoline.
-		tryTableEnterAddress *byte
-		// tryTableLeaveAddress is the address of try_table leave trampoline.
-		tryTableLeaveAddress *byte
+		// allocExceptionAddress is the address of the allocate-exception trampoline, called
+		// when a throw executes to start the raise and return a params buffer sized to the tag.
+		allocExceptionAddress *byte
+		// matchExceptionAddress is the address of the matchException trampoline, which matches
+		// the in-flight exception against a try_table's catch clauses.
+		matchExceptionAddress *byte
+		// propagateExceptionAddress is the address of the propagate-exception trampoline,
+		// called from a function's propagate path to overwrite this frame's saved return
+		// address with the caller's landing pad, so the frame's ordinary return unwinds the
+		// exception one level into the handler.
+		propagateExceptionAddress *byte
 		// exnrefSlotLoadAddress and exnrefSlotStoreAddress are the addresses of the
 		// barriers an exnref-typed global or table slot is accessed through. Compiled code
 		// hands them the address of the slot; the runtime owns the access itself, so that
 		// it cannot race another barrier on the same slot.
 		exnrefSlotLoadAddress  *byte
 		exnrefSlotStoreAddress *byte
+		// raiseRefAddress is the address of the throw_ref trampoline, which records the
+		// exception guest code is raising as the one in flight.
+		raiseRefAddress *byte
 		// exnrefSlotFillAddress and exnrefSlotCopyAddress are the addresses of the barriers
 		// over a run of exnref-typed table slots, which the bulk table operations write.
 		exnrefSlotFillAddress *byte
@@ -119,9 +127,14 @@ type (
 		offsets         wazevoapi.ModuleContextOffsetData
 		sharedFunctions *sharedFunctions
 		sourceMap       sourceMap
-		// tryTableInfo stores per-try_table metadata (catch clauses,
-		// local count) indexed by try_table ID assigned during compilation.
-		tryTableInfo []wazevoapi.TryTableInfo
+		// tryTableInfo stores per-try_table metadata (the catch clauses) per local
+		// function index, then per the try_table's ordinal within that function --
+		// the two halves of the ID compiled code carries. See wazevoapi.TryTableID.
+		tryTableInfo [][]wazevoapi.TryTableInfo
+		// exceptionTables holds the table-driven-EH exception table per local function
+		// index: function-relative call-site -> landing-pad offsets. Entries are sorted
+		// by CallBlockStart. nil/empty for functions without exception edges.
+		exceptionTables [][]wazevoapi.ExceptionTableEntry
 	}
 
 	executables struct {
@@ -144,12 +157,13 @@ type sourceMap struct {
 var _ wasm.Engine = (*engine)(nil)
 
 // NewEngine returns the implementation of wasm.Engine.
-func NewEngine(ctx context.Context, _ api.CoreFeatures, fc filecache.Cache) wasm.Engine {
+func NewEngine(ctx context.Context, enabledFeatures api.CoreFeatures, fc filecache.Cache) wasm.Engine {
 	machine := newMachine()
 	be := backend.NewCompiler(ctx, machine, ssa.NewBuilder())
 	e := &engine{
 		compiledModules: make(map[wasm.ModuleID]*compiledModuleWithCount),
 		setFinalizer:    runtime.SetFinalizer,
+		enabledFeatures: enabledFeatures,
 		machine:         machine,
 		be:              be,
 		fileCache:       fc,
@@ -259,18 +273,23 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 		return cm, nil
 	}
 
+	needSourceInfo := module.DWARFLines != nil
+	ehEnabled := e.enabledFeatures&experimental.CoreFeaturesExceptionHandling != 0
+
 	machine := newMachine()
 	relocator, err := newEngineRelocator(machine, importedFns, localFns)
 	if err != nil {
 		return nil, err
 	}
 
-	needSourceInfo := module.DWARFLines != nil
-
 	ssaBuilder := ssa.NewBuilder()
 	be := backend.NewCompiler(ctx, machine, ssaBuilder)
 	cm.executables.compileEntryPreambles(module, machine, be)
 	cm.functionOffsets = make([]int, localFns)
+	if ehEnabled {
+		cm.exceptionTables = make([][]wazevoapi.ExceptionTableEntry, localFns)
+		cm.tryTableInfo = make([][]wazevoapi.TryTableInfo, localFns)
+	}
 
 	var indexes []int
 	if wazevoapi.DeterministicCompilationVerifierEnabled {
@@ -280,7 +299,7 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 
 	if workers := experimental.GetCompilationWorkers(ctx); workers <= 1 {
 		// Compile with a single goroutine.
-		fe := frontend.NewFrontendCompiler(module, ssaBuilder, &cm.offsets, ensureTermination, withListener, needSourceInfo)
+		fe := frontend.NewFrontendCompiler(module, ssaBuilder, &cm.offsets, ensureTermination, withListener, needSourceInfo, ehEnabled)
 
 		for i := range module.CodeSection {
 			if wazevoapi.DeterministicCompilationVerifierEnabled {
@@ -291,14 +310,17 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 			fctx := functionContext(ctx, module, i, fidx)
 
 			needListener := len(listeners) > i && listeners[i] != nil
-			body, relsPerFunc, err := e.compileLocalWasmFunction(fctx, module, wasm.Index(i), fe, ssaBuilder, be, needListener)
+			body, relsPerFunc, excTable, tryTables, err := e.compileLocalWasmFunction(fctx, module, wasm.Index(i), fe, ssaBuilder, be, needListener)
 			if err != nil {
 				return nil, fmt.Errorf("compile function %d/%d: %v", i, len(module.CodeSection)-1, err)
 			}
 
+			if ehEnabled {
+				cm.exceptionTables[i] = excTable
+				cm.tryTableInfo[i] = tryTables
+			}
 			relocator.appendFunction(fctx, module, cm, i, fidx, body, relsPerFunc, be.SourceOffsetInfo())
 		}
-		cm.tryTableInfo = fe.TryTableMetadata()
 	} else {
 		// Compile with N worker goroutines.
 		// Collect compiled functions across workers in a slice,
@@ -317,10 +339,6 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 		ctx, cancel := context.WithCancelCause(ctx)
 		defer cancel(nil)
 
-		// Try-table IDs are baked into compiled machine code, so all
-		// workers must share a single table to ensure globally unique IDs.
-		sharedTTM := frontend.NewSharedTryTableMetadata()
-
 		var count atomic.Uint32
 		var wg sync.WaitGroup
 		wg.Add(workers)
@@ -333,9 +351,7 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 				machine := newMachine()
 				ssaBuilder := ssa.NewBuilder()
 				be := backend.NewCompiler(ctx, machine, ssaBuilder)
-				fe := frontend.NewFrontendCompiler(
-					module, ssaBuilder, &cm.offsets, ensureTermination, withListener, needSourceInfo).
-					WithTryTableMetadata(sharedTTM)
+				fe := frontend.NewFrontendCompiler(module, ssaBuilder, &cm.offsets, ensureTermination, withListener, needSourceInfo, ehEnabled)
 
 				for {
 					if err := ctx.Err(); err != nil {
@@ -356,12 +372,17 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 					fctx := functionContext(ctx, module, i, fidx)
 
 					needListener := len(listeners) > i && listeners[i] != nil
-					body, relsPerFunc, err := e.compileLocalWasmFunction(fctx, module, wasm.Index(i), fe, ssaBuilder, be, needListener)
+					body, relsPerFunc, excTable, tryTables, err := e.compileLocalWasmFunction(fctx, module, wasm.Index(i), fe, ssaBuilder, be, needListener)
 					if err != nil {
 						cancel(fmt.Errorf("compile function %d/%d: %v", i, len(module.CodeSection)-1, err))
 						return
 					}
 
+					// Distinct indexes per function, so workers need no synchronization.
+					if ehEnabled {
+						cm.exceptionTables[i] = excTable
+						cm.tryTableInfo[i] = tryTables
+					}
 					compiledFuncs[i] = compiledFunc{
 						fctx, i, fidx, body,
 						// These slices are internal to the backend compiler and since we are going to buffer them instead
@@ -382,7 +403,6 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 			fn := &compiledFuncs[i]
 			relocator.appendFunction(fn.fctx, module, cm, fn.fnum, fn.fidx, fn.body, fn.relsPerFunc, fn.offsPerFunc)
 		}
-		cm.tryTableInfo = sharedTTM.Table()
 	}
 
 	// Allocate executable memory and then copy the generated machine code.
@@ -517,7 +537,13 @@ func (e *engine) compileLocalWasmFunction(
 	ssaBuilder ssa.Builder,
 	be backend.Compiler,
 	needListener bool,
-) (body []byte, rels []backend.RelocationInfo, err error) {
+) (
+	body []byte,
+	rels []backend.RelocationInfo,
+	excTable []wazevoapi.ExceptionTableEntry,
+	tryTables []wazevoapi.TryTableInfo,
+	err error,
+) {
 	typIndex := module.FunctionSection[localFunctionIndex]
 	typ := &module.TypeSection[typIndex]
 	codeSeg := &module.CodeSection[localFunctionIndex]
@@ -551,11 +577,21 @@ func (e *engine) compileLocalWasmFunction(
 	// machine code.
 	original, rels, err := be.Compile(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ssa->machine code: %v", err)
+		return nil, nil, nil, nil, fmt.Errorf("ssa->machine code: %v", err)
+	}
+
+	// Resolve the table-driven-EH exception table now that binary offsets are final.
+	excTable = be.ExceptionTable()
+
+	if wazevoapi.DeterministicCompilationVerifierEnabled {
+		// The table is derived from block layout and the order edges were recorded, so it
+		// would drift with any nondeterminism in either even when the machine code itself
+		// came out identical.
+		wazevoapi.VerifyOrSetDeterministicCompilationContextValue(ctx, "Exception table", fmt.Sprintf("%v", excTable))
 	}
 
 	// TODO: optimize as zero copy.
-	return slices.Clone(original), rels, nil
+	return slices.Clone(original), rels, excTable, fe.TryTables(), nil
 }
 
 func (e *engine) compileHostModule(ctx context.Context, module *wasm.Module, listeners []experimental.FunctionListener) (*compiledModule, error) {
@@ -848,30 +884,23 @@ func (e *engine) compileSharedFunctions() {
 
 	e.be.Init()
 	addTrampoline(9,
-		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeThrow, &ssa.Signature{
-			// exec context, exnref
+		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeMatchException, &ssa.Signature{
+			// exec context, try_table ID → matched clause index, exnref
 			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI64},
-			Results: []ssa.Type{},
+			Results: []ssa.Type{ssa.TypeI64, ssa.TypeI64},
 		}, false))
 
 	e.be.Init()
 	addTrampoline(10,
-		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeTryTableEnter, &ssa.Signature{
-			// exec context, catch clause info (encoded)
-			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI64},
-			Results: []ssa.Type{},
-		}, false))
-
-	e.be.Init()
-	addTrampoline(11,
-		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeTryTableLeave, &ssa.Signature{
-			// exec context
+		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeThrow, &ssa.Signature{
+			// exec context (the table-driven propagation exit; saves callee-saved so the
+			// landing pad's prologue can restore them after the runtime redirects the IP).
 			Params:  []ssa.Type{ssa.TypeI64},
 			Results: []ssa.Type{},
 		}, false))
 
 	e.be.Init()
-	addTrampoline(12,
+	addTrampoline(11,
 		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeExnrefSlotLoad, &ssa.Signature{
 			// exec context, slot address → exnref
 			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI64},
@@ -879,10 +908,18 @@ func (e *engine) compileSharedFunctions() {
 		}, false))
 
 	e.be.Init()
-	addTrampoline(13,
+	addTrampoline(12,
 		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeExnrefSlotStore, &ssa.Signature{
 			// exec context, slot address, exnref
 			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
+			Results: []ssa.Type{},
+		}, false))
+
+	e.be.Init()
+	addTrampoline(13,
+		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeRaiseRef, &ssa.Signature{
+			// exec context, exnref
+			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI64},
 			Results: []ssa.Type{},
 		}, false))
 
@@ -933,17 +970,17 @@ func (e *engine) compileSharedFunctions() {
 	offset += sizes[6]
 	fns.memoryNotifyAddress = &fns.executable[offset]
 	offset += sizes[7]
-	fns.throwAllocTrampolineAddress = &fns.executable[offset]
+	fns.allocExceptionAddress = &fns.executable[offset]
 	offset += sizes[8]
-	fns.throwTrampolineAddress = &fns.executable[offset]
+	fns.matchExceptionAddress = &fns.executable[offset]
 	offset += sizes[9]
-	fns.tryTableEnterAddress = &fns.executable[offset]
+	fns.propagateExceptionAddress = &fns.executable[offset]
 	offset += sizes[10]
-	fns.tryTableLeaveAddress = &fns.executable[offset]
-	offset += sizes[11]
 	fns.exnrefSlotLoadAddress = &fns.executable[offset]
-	offset += sizes[12]
+	offset += sizes[11]
 	fns.exnrefSlotStoreAddress = &fns.executable[offset]
+	offset += sizes[12]
+	fns.raiseRefAddress = &fns.executable[offset]
 	offset += sizes[13]
 	fns.exnrefSlotFillAddress = &fns.executable[offset]
 	offset += sizes[14]
@@ -960,12 +997,12 @@ func (e *engine) compileSharedFunctions() {
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.memoryWait32Address)), uint64(sizes[5]), "memory_wait32_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.memoryWait64Address)), uint64(sizes[6]), "memory_wait64_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.memoryNotifyAddress)), uint64(sizes[7]), "memory_notify_trampoline")
-		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.throwAllocTrampolineAddress)), uint64(sizes[8]), "alloc_exception_trampoline")
-		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.throwTrampolineAddress)), uint64(sizes[9]), "throw_trampoline")
-		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.tryTableEnterAddress)), uint64(sizes[10]), "try_table_enter_trampoline")
-		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.tryTableLeaveAddress)), uint64(sizes[11]), "try_table_leave_trampoline")
-		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.exnrefSlotLoadAddress)), uint64(sizes[12]), "exnref_slot_load_trampoline")
-		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.exnrefSlotStoreAddress)), uint64(sizes[13]), "exnref_slot_store_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.allocExceptionAddress)), uint64(sizes[8]), "alloc_exception_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.matchExceptionAddress)), uint64(sizes[9]), "match_exception_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.propagateExceptionAddress)), uint64(sizes[10]), "propagate_exception_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.exnrefSlotLoadAddress)), uint64(sizes[11]), "exnref_slot_load_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.exnrefSlotStoreAddress)), uint64(sizes[12]), "exnref_slot_store_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.raiseRefAddress)), uint64(sizes[13]), "raise_ref_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.exnrefSlotFillAddress)), uint64(sizes[14]), "exnref_slot_fill_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.exnrefSlotCopyAddress)), uint64(sizes[15]), "exnref_slot_copy_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.adjustExnrefsAddress)), uint64(sizes[16]), "adjust_exnrefs_trampoline")

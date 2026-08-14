@@ -31,6 +31,7 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
+	"github.com/tetratelabs/wazero/internal/leb128"
 	"github.com/tetratelabs/wazero/internal/platform"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/wasm"
@@ -134,6 +135,9 @@ func runEHTests(t *testing.T, cfg wazero.RuntimeConfig) {
 	t.Run("propagate_tail_call", func(t *testing.T) {
 		testEHPropagateTailCall(t, cfg)
 	})
+	t.Run("catch_stack_arg_call", func(t *testing.T) {
+		testEHCatchStackArgCall(t, cfg)
+	})
 	t.Run("uncaught_stack_trace", func(t *testing.T) {
 		testEHUncaughtStackTrace(t, cfg)
 	})
@@ -181,6 +185,12 @@ func runEHTests(t *testing.T, cfg wazero.RuntimeConfig) {
 	})
 	t.Run("listener_abort_module_identity", func(t *testing.T) {
 		testEHListenerAbortModuleIdentity(t, cfg)
+	})
+	t.Run("propagate_tail_call_stack_args", func(t *testing.T) {
+		testEHPropagateTailCallStackArgs(t, cfg)
+	})
+	t.Run("register_pressure", func(t *testing.T) {
+		testEHRegisterPressure(t, cfg)
 	})
 }
 
@@ -627,9 +637,10 @@ func testEHPropagateTailCall(t *testing.T, cfg wazero.RuntimeConfig) {
 	requireEHCatchReturns42(t, cfg, buildEHPropagateModule(true))
 }
 
-// testEHUncaughtStackTrace pins the wasm stack trace an uncaught exception carries: the
-// stack of the throw that was propagating, captured as the raise started. Asserting the
-// exact text is what keeps the two engines from drifting apart here.
+// testEHUncaughtStackTrace pins the wasm stack trace an uncaught exception carries. The
+// compiler unwinds by returning, so its frames are gone by the time the exception is known
+// to be uncaught; the trace has to come from what was captured as it propagated. Asserting
+// the exact text is what keeps the two engines from drifting apart here.
 func testEHUncaughtStackTrace(t *testing.T, cfg wazero.RuntimeConfig) {
 	ctx := context.Background()
 	r := wazero.NewRuntimeWithConfig(ctx, cfg)
@@ -1170,13 +1181,10 @@ func TestExceptionHandlingCompilerRefCounting(t *testing.T) {
 			require.Equal(t, int32(iters), api.DecodeI32(res[0]), "the loop ran to completion")
 
 			growth := int64(liveDuringCall) - int64(baseline)
-			// A held exception runs to well over 64 bytes -- the object, its params, its
-			// trace -- so this budget cannot be met while holding even a fraction of them.
-			//
-			// The floor is not zero: entering a try_table clones the stack 16 bytes larger
-			// than the one it came from, and a catch keeps the clone, so a loop that catches
-			// grows the heap by that much per try_table per iteration whatever it holds.
-			require.True(t, growth < iters*64,
+			// A held exception runs to well over 32 bytes -- the object, its params, its
+			// trace -- so this budget cannot be met while holding even a fraction of them,
+			// and leaves room for unrelated heap noise.
+			require.True(t, growth < iters*32,
 				"live heap grew by %d bytes over %d catch_all_ref iterations in one call: "+
 					"a reference that guest code has let go of should not be held",
 				growth, iters)
@@ -1538,6 +1546,185 @@ originally thrown at:
 	}
 }
 
+// testEHCatchStackArgCall catches an exception thrown out of a call whose arguments do not
+// all fit in registers. On amd64 such a call is bracketed by `sub $size, %rsp` /
+// `add $size, %rsp`, and the landing pad is entered by overwriting the return address, so
+// the trailing `add` never runs on the throwing path: the handler has to be reached with
+// the frame's stack pointer already put back, or every spill slot it touches is off by the
+// argument area.
+//
+// The parameter counts straddle the boundary on both backends -- 7 or fewer i64 arguments
+// fit in registers on amd64 (9 argument registers less the execution and module contexts),
+// 6 on arm64.
+func testEHCatchStackArgCall(t *testing.T, cfg wazero.RuntimeConfig) {
+	for _, nParams := range []int{0, 6, 7, 8, 20} {
+		t.Run(fmt.Sprintf("params=%d", nParams), func(t *testing.T) {
+			requireEHCatchReturns42(t, cfg, buildEHStackArgCallModule(nParams))
+		})
+	}
+}
+
+// buildEHStackArgCallModule builds:
+//
+//	$thrower (i64 xN) -> ()     { throw $t }
+//	$a       ()       -> (i32)  { block { try_table(catch_all -> block){ N zeros; call $thrower }
+//	                                      <sentinel>; return }
+//	                              i32.const 42 }
+func buildEHStackArgCallModule(nParams int) []byte {
+	params := make([]wasm.ValueType, nParams)
+	for i := range params {
+		params[i] = wasm.ValueTypeI64
+	}
+	m := &wasm.Module{
+		TypeSection: []wasm.FunctionType{
+			{Params: params}, // type0: (i64 xN) -> ()   ($thrower)
+			{Results: []wasm.ValueType{wasm.ValueTypeI32}}, // type1: () -> (i32)  ($a)
+			{}, // type2: () -> ()  (tag)
+		},
+		TagSection:      []wasm.Tag{{Type: 2}},
+		FunctionSection: []wasm.Index{0, 1},
+		ExportSection:   []wasm.Export{{Type: wasm.ExternTypeFunc, Name: "a", Index: 1}},
+	}
+
+	thrower := []byte{wasm.OpcodeThrow, 0x00, wasm.OpcodeEnd}
+
+	a := []byte{
+		wasm.OpcodeBlock, 0x40,
+		wasm.OpcodeTryTable, 0x40, 0x01, wasm.CatchKindCatchAll, 0x00,
+	}
+	for i := 0; i < nParams; i++ {
+		a = append(a, wasm.OpcodeI64Const, 0x00)
+	}
+	a = append(a,
+		wasm.OpcodeCall, 0x00, // call $thrower
+		wasm.OpcodeEnd,                               // end try_table
+		wasm.OpcodeI32Const, 0x63, wasm.OpcodeReturn, // sentinel on the normal path (unreached)
+		wasm.OpcodeEnd,            // end block (catch_all lands here)
+		wasm.OpcodeI32Const, 0x2a, // 42
+		wasm.OpcodeEnd,
+	)
+
+	m.CodeSection = []wasm.Code{{Body: thrower}, {Body: a}}
+	return encodeModule(m)
+}
+
+// tailCallTryShape describes where $mid's own try_table sits relative to its return_call
+// in buildEHTailCallStackArgsModule.
+type tailCallTryShape byte
+
+const (
+	// tailCallNoTry: $mid has no try_table, so its exception table is empty.
+	tailCallNoTry tailCallTryShape = iota
+	// tailCallTryBefore: $mid wraps an unrelated call in a try_table and then does the
+	// return_call outside it, so $mid has an exception-table entry that the return_call's
+	// return address must not resolve onto.
+	tailCallTryBefore
+	// tailCallTryAround: the return_call is lexically inside $mid's own try_table, which
+	// must not catch the callee's exception.
+	tailCallTryAround
+)
+
+// testEHPropagateTailCallStackArgs is testEHPropagateTailCall for a return_call whose
+// arguments do not all fit in registers. Both backends fall back to a plain (non-tail)
+// call in that case, so the callee returns into $mid's still-live frame instead of
+// replacing it — but per the spec return_call has already left $mid, so an exception
+// raised by the callee must bypass $mid entirely and land in $a.
+func testEHPropagateTailCallStackArgs(t *testing.T, cfg wazero.RuntimeConfig) {
+	for _, tc := range []struct {
+		name  string
+		shape tailCallTryShape
+	}{
+		{"no_own_try", tailCallNoTry},
+		{"try_before", tailCallTryBefore},
+		{"try_around", tailCallTryAround},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requireEHCatchReturns42(t, cfg, buildEHTailCallStackArgsModule(tc.shape))
+		})
+	}
+}
+
+// buildEHTailCallStackArgsModule builds:
+//
+//	$noop    ()           -> ()
+//	$thrower (i64 x 20)   -> ()     { throw $t }
+//	$mid     ()           -> ()     { 20 zeros; return_call $thrower }  ;; plus a try_table
+//	                                                                    ;; per `shape`
+//	$a       ()           -> (i32)  { block { try_table(catch_all -> block){ call $mid }
+//	                                          <sentinel>; return }
+//	                                  i32.const 42 }
+//
+// 20 i64 params exceed the argument registers on both backends, which is what forces
+// the return_call to be lowered as a plain call. $a returns the non-42 sentinel if
+// anything catches or swallows the exception before it gets there.
+func buildEHTailCallStackArgsModule(shape tailCallTryShape) []byte {
+	const nParams = 20
+	params := make([]wasm.ValueType, nParams)
+	for i := range params {
+		params[i] = wasm.ValueTypeI64
+	}
+	m := &wasm.Module{
+		TypeSection: []wasm.FunctionType{
+			{}, // type0: () -> ()      ($noop, $mid, tag)
+			{Results: []wasm.ValueType{wasm.ValueTypeI32}}, // type1: () -> (i32)  ($a)
+			{Params: params}, // type2: (i64 x 20) -> ()  ($thrower)
+		},
+		TagSection:      []wasm.Tag{{Type: 0}},
+		FunctionSection: []wasm.Index{0, 2, 0, 1}, // $noop, $thrower, $mid, $a
+		ExportSection:   []wasm.Export{{Type: wasm.ExternTypeFunc, Name: "a", Index: 3}},
+	}
+
+	noop := []byte{wasm.OpcodeEnd}
+	thrower := []byte{wasm.OpcodeThrow, 0x00, wasm.OpcodeEnd}
+
+	tailCall := []byte{}
+	for i := 0; i < nParams; i++ {
+		tailCall = append(tailCall, wasm.OpcodeI64Const, 0x00)
+	}
+	tailCall = append(tailCall, wasm.OpcodeTailCallReturnCall, 0x01)
+
+	var mid []byte
+	switch shape {
+	case tailCallNoTry:
+		mid = append(mid, tailCall...)
+	case tailCallTryBefore:
+		mid = append(mid,
+			wasm.OpcodeBlock, 0x40,
+			wasm.OpcodeTryTable, 0x40, 0x01, wasm.CatchKindCatchAll, 0x00,
+			wasm.OpcodeCall, 0x00, // call $noop
+			wasm.OpcodeEnd, // end try_table
+			wasm.OpcodeEnd, // end block
+		)
+		mid = append(mid, tailCall...)
+	case tailCallTryAround:
+		mid = append(mid,
+			wasm.OpcodeBlock, 0x40,
+			wasm.OpcodeTryTable, 0x40, 0x01, wasm.CatchKindCatchAll, 0x00,
+			wasm.OpcodeCall, 0x00, // call $noop, so the try body has a landing pad too
+		)
+		mid = append(mid, tailCall...)
+		mid = append(mid,
+			wasm.OpcodeEnd, // end try_table
+			wasm.OpcodeEnd, // end block
+		)
+	}
+	mid = append(mid, wasm.OpcodeEnd)
+
+	a := []byte{
+		wasm.OpcodeBlock, 0x40,
+		wasm.OpcodeTryTable, 0x40, 0x01, wasm.CatchKindCatchAll, 0x00,
+		wasm.OpcodeCall, 0x02, // call $mid
+		wasm.OpcodeEnd,                               // end try_table
+		wasm.OpcodeI32Const, 0x63, wasm.OpcodeReturn, // sentinel on the normal path (unreached)
+		wasm.OpcodeEnd,            // end block (catch_all lands here)
+		wasm.OpcodeI32Const, 0x2a, // 42
+		wasm.OpcodeEnd,
+	}
+
+	m.CodeSection = []wasm.Code{{Body: noop}, {Body: thrower}, {Body: mid}, {Body: a}}
+	return encodeModule(m)
+}
+
 func requireEHCatchReturns42(t *testing.T, cfg wazero.RuntimeConfig, bin []byte) {
 	t.Helper()
 	ctx := context.Background()
@@ -1596,6 +1783,145 @@ func buildEHPropagateModule(tailCall bool) []byte {
 	return encodeModule(m)
 }
 
+// testEHRegisterPressure guards register allocation under exception handling: locals
+// kept live across calls must survive intact, including across the exception
+// landing-pad edges that calls acquire when EH is enabled.
+//
+// The module keeps 16 non-zero i64 locals live across calls (both an internal call
+// and an imported host call) in a loop, under enough register pressure that the
+// allocator must use registers beyond the argument/result set. With exception
+// handling enabled it must still return the correct sum and raise no exception.
+func testEHRegisterPressure(t *testing.T, cfg wazero.RuntimeConfig) {
+	ctx := context.Background()
+	r := wazero.NewRuntimeWithConfig(ctx, cfg)
+	defer r.Close(ctx)
+
+	// Host module providing the imported function exercised inside the loop (so live
+	// locals must also survive a Go-function trampoline return).
+	_, err := r.NewHostModuleBuilder("env").
+		NewFunctionBuilder().WithFunc(func() {}).Export("ext").
+		Instantiate(ctx)
+	require.NoError(t, err)
+
+	mod, err := r.InstantiateWithConfig(ctx, buildRegPressureModule(),
+		wazero.NewModuleConfig().WithStartFunctions())
+	require.NoError(t, err)
+
+	res, err := mod.ExportedFunction("run").Call(ctx)
+	require.NoError(t, err) // must NOT be "uncaught exception"
+	// Sum of 1..16 = 136, computed after the calls, so all 16 locals must survive.
+	require.Equal(t, uint64(136), res[0])
+}
+
+// buildRegPressureModule builds:
+//
+//	(import "env" "ext" (func))             ;; func 0 (host -> trampoline)
+//	(func $callee)                          ;; func 1, empty (internal call)
+//	(func (export "run") (result i64)       ;; func 2
+//	  (local i64 x16) (local i32)           ;; 16 i64 accumulators + counter
+//	  set local 0..15 = 1..16
+//	  loop { call $ext; call $callee; counter++; br_if counter<500 }
+//	  return local0 + local1 + ... + local15)
+func buildRegPressureModule() []byte {
+	const counter = 16 // i32 local index (after 16 i64 locals 0..15)
+
+	var body []byte
+	for i := 0; i < 16; i++ {
+		body = append(body, wasm.OpcodeI64Const)
+		body = append(body, leb128.EncodeInt64(int64(i+1))...)
+		body = append(body, wasm.OpcodeLocalSet)
+		body = append(body, leb128.EncodeUint32(uint32(i))...)
+	}
+	body = append(body, wasm.OpcodeLoop, 0x40)
+	body = append(body, wasm.OpcodeCall, 0) // call imported $ext (func index 0)
+	body = append(body, wasm.OpcodeCall, 1) // call internal $callee (func index 1)
+	body = append(body, wasm.OpcodeLocalGet)
+	body = append(body, leb128.EncodeUint32(counter)...)
+	body = append(body, wasm.OpcodeI32Const, 1, wasm.OpcodeI32Add)
+	body = append(body, wasm.OpcodeLocalTee)
+	body = append(body, leb128.EncodeUint32(counter)...)
+	body = append(body, wasm.OpcodeI32Const)
+	body = append(body, leb128.EncodeInt32(500)...)
+	body = append(body, wasm.OpcodeI32LtU)
+	body = append(body, wasm.OpcodeBrIf, 0)
+	body = append(body, wasm.OpcodeEnd) // end loop
+	body = append(body, wasm.OpcodeLocalGet, 0)
+	for i := 1; i < 16; i++ {
+		body = append(body, wasm.OpcodeLocalGet)
+		body = append(body, leb128.EncodeUint32(uint32(i))...)
+		body = append(body, wasm.OpcodeI64Add)
+	}
+	body = append(body, wasm.OpcodeEnd) // end func
+
+	var buf []byte
+	buf = append(buf, 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00)
+	// Type section: type0 ()->() , type1 ()->(i64).
+	buf = appendSection(buf, 1, func(s []byte) []byte {
+		s = appendUleb128(s, 2)
+		s = append(s, 0x60, 0, 0)                          // ()->()
+		s = append(s, 0x60, 0, 1, byte(wasm.ValueTypeI64)) // ()->(i64)
+		return s
+	})
+	// Import section: env.ext : type0 (func index 0).
+	buf = appendSection(buf, 2, func(s []byte) []byte {
+		s = appendUleb128(s, 1)
+		s = appendUleb128(s, 3)
+		s = append(s, "env"...)
+		s = appendUleb128(s, 3)
+		s = append(s, "ext"...)
+		s = append(s, wasm.ExternTypeFunc)
+		s = appendUleb128(s, 0) // type index 0
+		return s
+	})
+	// Function section: func1=type0 (callee), func2=type1 (run).
+	buf = appendSection(buf, 3, func(s []byte) []byte {
+		s = appendUleb128(s, 2)
+		s = append(s, 0, 1)
+		return s
+	})
+	// Export section: "run" = func index 2.
+	buf = appendSection(buf, 7, func(s []byte) []byte {
+		s = appendUleb128(s, 1)
+		s = appendUleb128(s, 3)
+		s = append(s, "run"...)
+		s = append(s, wasm.ExternTypeFunc)
+		s = appendUleb128(s, 2)
+		return s
+	})
+	// Code section: callee (empty) + run.
+	buf = appendSection(buf, 10, func(s []byte) []byte {
+		s = appendUleb128(s, 2)
+		cb := appendUleb128(nil, 0)
+		cb = append(cb, wasm.OpcodeEnd)
+		s = appendUleb128(s, uint32(len(cb)))
+		s = append(s, cb...)
+		rb := appendUleb128(nil, 2)
+		rb = appendUleb128(rb, 16)
+		rb = append(rb, byte(wasm.ValueTypeI64))
+		rb = appendUleb128(rb, 1)
+		rb = append(rb, byte(wasm.ValueTypeI32))
+		rb = append(rb, body...)
+		s = appendUleb128(s, uint32(len(rb)))
+		s = append(s, rb...)
+		return s
+	})
+	return buf
+}
+
+// ehLifetimeModule builds the module the exnref lifetime tests share. It has one tag, an
+// exnref global and an exnref table, and exports the operations a test needs to move a
+// reference between them:
+//
+//	"park"      throw, catch by reference, put it in global 0            -> 1
+//	"use"       read global 0, throw it again, catch it                  -> 1
+//	"clear"     put ref.null in global 0
+//	"read_then_clear" read global 0, clear the global, then throw what was read -> 1
+//	"to_table"  read global 0 into table[i]
+//	"from_table" read table[i], throw it, catch it                       -> 1
+//	"fill"      table.fill the whole table with global 0's reference
+//	"copy"      table[1] = global 0, then table.copy table[2..4) <- table[0..2)
+//	"grow"      table.grow by 2 with global 0's reference                -> new size
+//	"null_table" table[i] = ref.null
 func ehLifetimeModule() []byte {
 	const (
 		fnThrow = iota // () -> ()          throws tag 0
@@ -2608,6 +2934,83 @@ func TestExceptionHandlingCompilerSnapshotRewindsExnrefs(t *testing.T) {
 	}
 }
 
+// TestExceptionHandlingCompilerTailCallFallbackPropagates covers a return_call the backend
+// lowers as a plain call, which it does when the call has stack arguments. The frame is still
+// on the stack when the callee raises, so the raise comes back through its landing pad -- but
+// the return_call already released everything the frame held, since a real tail call would
+// have left nowhere to do it afterwards. Propagating from there must not release any of it a
+// second time.
+func TestExceptionHandlingCompilerTailCallFallbackPropagates(t *testing.T) {
+	if !platform.CompilerSupported() {
+		t.Skip()
+	}
+	// Wide enough that the tail call has stack arguments.
+	manyI64 := make([]wasm.ValueType, 12)
+	for i := range manyI64 {
+		manyI64[i] = wasm.ValueTypeI64
+	}
+
+	raiser := &wasm.Module{
+		TypeSection:     []wasm.FunctionType{{Params: manyI64}, {}},
+		TagSection:      []wasm.Tag{{Type: 1}},
+		FunctionSection: []wasm.Index{0},
+		ExportSection:   []wasm.Export{{Type: wasm.ExternTypeFunc, Name: "raise", Index: 0}},
+		CodeSection:     []wasm.Code{{Body: []byte{wasm.OpcodeThrow, 0x00, wasm.OpcodeEnd}}},
+	}
+
+	// Catch one by reference into a local, then return_call the imported raiser. This is
+	// ehCaughtExnrefPrologue spelled out, because the import takes function index 0 here and
+	// the thrower it calls is index 1.
+	body := []byte{
+		wasm.OpcodeBlock, byte(wasm.ValueTypeExnref),
+		wasm.OpcodeTryTable, 0x40, 0x01, wasm.CatchKindCatchAllRef, 0x00,
+		wasm.OpcodeCall, 0x01, // the local thrower
+		wasm.OpcodeEnd, // try_table: the body always throws, so this is unreachable.
+		wasm.OpcodeUnreachable,
+		wasm.OpcodeEnd, // block: caught, with the exnref on the stack.
+		wasm.OpcodeLocalSet, 0x00,
+	}
+	for range manyI64 {
+		body = append(body, wasm.OpcodeI64Const, 0x00)
+	}
+	body = append(body, wasm.OpcodeTailCallReturnCall, 0x00, wasm.OpcodeEnd)
+	caller := &wasm.Module{
+		TypeSection:         []wasm.FunctionType{{}, {Params: manyI64}},
+		ImportSection:       []wasm.Import{{Module: "b", Name: "raise", Type: wasm.ExternTypeFunc, DescFunc: 1}},
+		ImportFunctionCount: 1,
+		TagSection:          []wasm.Tag{{Type: 0}},
+		FunctionSection:     []wasm.Index{0, 0}, // 1: thrower, 2: main
+		ExportSection:       []wasm.Export{{Type: wasm.ExternTypeFunc, Name: "main", Index: 2}},
+		CodeSection: []wasm.Code{
+			{Body: []byte{wasm.OpcodeThrow, 0x00, wasm.OpcodeEnd}},
+			{LocalTypes: []wasm.ValueType{wasm.ValueTypeExnref}, Body: body},
+		},
+	}
+
+	ctx := context.Background()
+	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigCompiler().
+		WithCoreFeatures(api.CoreFeaturesV2|experimental.CoreFeaturesExceptionHandling|
+			experimental.CoreFeaturesTailCall))
+	defer r.Close(ctx)
+
+	_, err := r.InstantiateWithConfig(ctx, encodeModule(raiser),
+		wazero.NewModuleConfig().WithName("b"))
+	require.NoError(t, err)
+	mod, err := r.Instantiate(ctx, encodeModule(caller))
+	require.NoError(t, err)
+
+	// The callee's exception is uncaught, which is the point: it has to propagate out
+	// through the still-live caller frame rather than trip over its own bookkeeping.
+	_, err = mod.ExportedFunction("main").Call(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "uncaught exception")
+}
+
+// TestExceptionHandlingExnrefIsNotCallableFromHost covers the boundary rule: an exnref names
+// an exception only inside the call that produced it, so a function whose signature mentions
+// one cannot be entered from the host in either direction. The module itself stays valid, and
+// wasm-to-wasm calls of the same type keep working -- which is what "reachable" proves, since
+// the export that is callable reaches the one that is not.
 func TestExceptionHandlingExnrefIsNotCallableFromHost(t *testing.T) {
 	exnref := []wasm.ValueType{wasm.ValueTypeExnref}
 	i32 := []wasm.ValueType{wasm.ValueTypeI32}

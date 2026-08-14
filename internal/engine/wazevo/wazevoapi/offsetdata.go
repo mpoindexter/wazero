@@ -53,24 +53,21 @@ const (
 	ExecutionContextOffsetMemoryWait32TrampolineAddress Offset = 1160
 	ExecutionContextOffsetMemoryWait64TrampolineAddress Offset = 1168
 	ExecutionContextOffsetMemoryNotifyTrampolineAddress Offset = 1176
-	// ExecutionContextOffsetThrowAllocTrampolineAddress is the address of the
-	// throw-alloc trampoline, which records the raise and returns a params
-	// buffer sized to the tag.
-	ExecutionContextOffsetThrowAllocTrampolineAddress Offset = 1184
-	// ExecutionContextOffsetThrowTrampolineAddress is the address of the raise trampoline,
-	// which searches the active try handlers for one catching the in-flight exception.
-	ExecutionContextOffsetThrowTrampolineAddress Offset = 1192
-	// ExecutionContextOffsetTryTableEnterTrampolineAddress and
-	// ExecutionContextOffsetTryTableLeaveTrampolineAddress are the addresses of the
-	// trampolines that push and pop a try_table's handler checkpoint.
-	ExecutionContextOffsetTryTableEnterTrampolineAddress Offset = 1200
-	ExecutionContextOffsetTryTableLeaveTrampolineAddress Offset = 1208
+	// ExecutionContextOffsetAllocExceptionTrampolineAddress is an offset of `allocExceptionTrampolineAddress` field in wazevo.executionContext
+	ExecutionContextOffsetAllocExceptionTrampolineAddress Offset = 1184
+	// ExecutionContextOffsetMatchExceptionTrampolineAddress is an offset of `matchExceptionTrampolineAddress` field in wazevo.executionContext
+	ExecutionContextOffsetMatchExceptionTrampolineAddress Offset = 1192
+	// ExecutionContextOffsetPropagateExceptionTrampolineAddress is an offset of `propagateExceptionTrampolineAddress` field in wazevo.executionContext
+	ExecutionContextOffsetPropagateExceptionTrampolineAddress Offset = 1200
 	// ExecutionContextOffsetExnrefSlotLoadTrampolineAddress is the address of the read
 	// barrier compiled code calls to access an exnref-typed global or table slot.
-	ExecutionContextOffsetExnrefSlotLoadTrampolineAddress Offset = 1216
+	ExecutionContextOffsetExnrefSlotLoadTrampolineAddress Offset = 1208
 	// ExecutionContextOffsetExnrefSlotStoreTrampolineAddress is the address of the write
 	// barrier compiled code calls to access an exnref-typed global or table slot.
-	ExecutionContextOffsetExnrefSlotStoreTrampolineAddress Offset = 1224
+	ExecutionContextOffsetExnrefSlotStoreTrampolineAddress Offset = 1216
+	// ExecutionContextOffsetRaiseRefTrampolineAddress is the address of the throw_ref
+	// trampoline, which records the exception guest code is raising as the one in flight.
+	ExecutionContextOffsetRaiseRefTrampolineAddress Offset = 1224
 	// ExecutionContextOffsetExnrefSlotFillTrampolineAddress is the address of the barrier
 	// over a run of exnref-typed table slots, which table.fill writes.
 	ExecutionContextOffsetExnrefSlotFillTrampolineAddress Offset = 1232
@@ -84,16 +81,6 @@ const (
 	// (a *uint64), the address of the params of the exception a handler was just entered
 	// for. A load at this offset yields the address the handler reads the param values from.
 	ExecutionContextOffsetCaughtExceptionParams Offset = 1256
-	// ExecutionContextOffsetCaughtExceptionRef is the handle naming the exception a handler
-	// was just entered for, which catch_ref and catch_all_ref push as an exnref.
-	ExecutionContextOffsetCaughtExceptionRef Offset = 1264
-	// ExecutionContextOffsetCaughtExceptionClauseIdx is the matched catch clause index
-	// written by the raise trampoline and read by compiled handler dispatch code.
-	ExecutionContextOffsetCaughtExceptionClauseIdx Offset = 1272
-	// ExecutionContextOffsetLocalsSaveAreaPtr points to a heap-allocated buffer
-	// where locals are mirrored inside try_table bodies, so that handler blocks
-	// can read throw-time local values after stack-clone restore.
-	ExecutionContextOffsetLocalsSaveAreaPtr Offset = 1280
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

@@ -185,6 +185,15 @@ func (m *machine) getOrAllocateSSABlockLabelPosition(sb ssa.BasicBlock) *labelPo
 	return pos
 }
 
+// BlockBinaryOffset implements backend.Machine.
+func (m *machine) BlockBinaryOffset(id ssa.BasicBlockID) int64 {
+	pos := m.labelPositionPool.Get(int(id)) // ssaBlockLabel(sb) == label(sb.ID()).
+	if pos == nil {
+		panic("BUG: no label position for block " + id.String())
+	}
+	return pos.binaryOffset
+}
+
 // LinkAdjacentBlocks implements backend.Machine.
 func (m *machine) LinkAdjacentBlocks(prev, next ssa.BasicBlock) {
 	prevPos, nextPos := m.getOrAllocateSSABlockLabelPosition(prev), m.getOrAllocateSSABlockLabelPosition(next)
@@ -402,9 +411,16 @@ func (m *machine) resolveRelativeAddresses(ctx context.Context) {
 			for cur := pos.begin; ; cur = cur.next {
 				switch cur.kind {
 				case nop0:
-					l := cur.nop0Label()
-					if pos := m.labelPositionPool.Get(int(l)); pos != nil {
-						pos.binaryOffset = offset + size
+					// Plain/filler nops carry label 0 (the default u1). Label 0 is also the
+					// entry block, whose offset is set by the outer loop; an explicit
+					// mid-stream label marker is only ever emitted for non-entry blocks
+					// (e.g. merged/trampoline blocks not in orderedSSABlockLabelPos). So
+					// only act on non-zero labels, otherwise every filler nop would
+					// overwrite the entry block's binaryOffset with its own position.
+					if l := cur.nop0Label(); l != 0 {
+						if pos := m.labelPositionPool.Get(int(l)); pos != nil {
+							pos.binaryOffset = offset + size
+						}
 					}
 				case condBr:
 					if !cur.condBrOffsetResolved() {

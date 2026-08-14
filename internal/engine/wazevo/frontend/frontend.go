@@ -4,7 +4,6 @@ package frontend
 import (
 	"bytes"
 	"math"
-	"sync"
 
 	"github.com/tetratelabs/wazero/internal/engine/wazevo/ssa"
 	"github.com/tetratelabs/wazero/internal/engine/wazevo/wazevoapi"
@@ -63,23 +62,25 @@ type Compiler struct {
 
 	execCtxPtrValue, moduleCtxPtrValue ssa.Value
 
-	// throwAllocSig is the signature for the throw-alloc trampoline:
-	// (execCtx, tagIndex) → (params buffer). Records the raise and returns the
-	// buffer for compiled code to store the params into.
-	throwAllocSig ssa.Signature
-	// throwSig is the signature for the throw/throw_ref trampoline:
-	// (execCtx, exnref) → (). Searches for a matching handler and restores.
-	throwSig ssa.Signature
-	// tryTableEnterSig is the signature for the try_table enter trampoline.
-	tryTableEnterSig ssa.Signature
-	// tryTableLeaveSig is the signature for the try_table leave trampoline.
-	tryTableLeaveSig ssa.Signature
+	// allocExceptionSig is the signature for the allocate-exception trampoline:
+	// (execCtx, tagIndex) → (params buffer). Starts the raise and returns the buffer for
+	// compiled code to store the params into.
+	allocExceptionSig ssa.Signature
+	// propagateExceptionSig is the signature for the propagate-exception trampoline (table-driven propagation
+	// exit): {exec context} -> {}.
+	propagateExceptionSig ssa.Signature
+	// matchExceptionSig is the signature for the matchException trampoline:
+	// (execCtx, tryTableID) → (matched clause index, exnref). Matches the in-flight
+	// exception against a try_table's catch clauses.
+	matchExceptionSig ssa.Signature
 	// exnrefSlotLoadSig and exnrefSlotStoreSig are the signatures for the barriers an
 	// exnref-typed global or table slot is accessed through: (execCtx, slot address) →
 	// (exnref), and (execCtx, slot address, exnref) → (). The runtime does the access
 	// itself, so that it cannot race another barrier on the same slot.
 	exnrefSlotLoadSig  ssa.Signature
 	exnrefSlotStoreSig ssa.Signature
+	// raiseRefSig is the signature for the throw_ref trampoline: (execCtx, exnref) → ().
+	raiseRefSig ssa.Signature
 	// exnrefSlotFillSig and exnrefSlotCopySig are the signatures for the barriers over a
 	// run of exnref-typed table slots: (execCtx, addr, exnref|srcAddr, count) → ().
 	exnrefSlotFillSig ssa.Signature
@@ -87,12 +88,22 @@ type Compiler struct {
 	// adjustExnrefsSig is the signature for the reference count adjustment trampoline:
 	// (execCtx, handle gaining a reference, handle losing one) → ().
 	adjustExnrefsSig ssa.Signature
-	// tryTableMetadata accumulates try_table metadata during compilation.
-	tryTableMetadata tryTableMetadata
-	// tryTableDepth tracks try_table nesting. When > 0, local.set/local.tee
-	// emit extra stores to the locals save area so handler blocks can read
-	// throw-time values.
-	tryTableDepth int
+	// tryTables holds this function's try_table metadata, indexed by the try_table's
+	// ordinal within the function. That ordinal, paired with the function index, is the
+	// ID compiled code passes to matchException (see wazevoapi.TryTableID). Reset per
+	// function, and handed to the caller by TryTables.
+	tryTables []wazevoapi.TryTableInfo
+	// ehEnabled is true when the exception-handling feature is enabled for this
+	// engine. When set, the frontend wires each call's return site to an exception
+	// landing pad (see emitCallExceptionEdge) for table-driven propagation.
+	ehEnabled bool
+	// exceptionPropagateBlk is the per-function block an uncaught exception returns
+	// through to propagate to the caller. Created lazily; reset per function.
+	exceptionPropagateBlk ssa.BasicBlock
+	// exceptionPropagateAfterReleaseBlk is exceptionPropagateBlk for a frame that has
+	// already let go of its locals, which only a return_call leaves behind. Created
+	// lazily; reset per function.
+	exceptionPropagateAfterReleaseBlk ssa.BasicBlock
 
 	// Following are reused for the known safe bounds analysis.
 
@@ -119,7 +130,7 @@ type (
 var knownSafeBoundsAtTheEndOfBlockNil = wazevoapi.NewNilVarLength[knownSafeBoundWithID]()
 
 // NewFrontendCompiler returns a frontend Compiler.
-func NewFrontendCompiler(m *wasm.Module, ssaBuilder ssa.Builder, offset *wazevoapi.ModuleContextOffsetData, ensureTermination bool, listenerOn bool, sourceInfo bool) *Compiler {
+func NewFrontendCompiler(m *wasm.Module, ssaBuilder ssa.Builder, offset *wazevoapi.ModuleContextOffsetData, ensureTermination bool, listenerOn bool, sourceInfo bool, ehEnabled bool) *Compiler {
 	c := &Compiler{
 		m:                                 m,
 		ssaBuilder:                        ssaBuilder,
@@ -127,71 +138,17 @@ func NewFrontendCompiler(m *wasm.Module, ssaBuilder ssa.Builder, offset *wazevoa
 		offset:                            offset,
 		ensureTermination:                 ensureTermination,
 		needSourceOffsetInfo:              sourceInfo,
-		tryTableMetadata:                  &localTryTableMetadata{},
+		ehEnabled:                         ehEnabled,
 		varLengthKnownSafeBoundWithIDPool: wazevoapi.NewVarLengthPool[knownSafeBoundWithID](),
 	}
 	c.declareSignatures(listenerOn)
 	return c
 }
 
-// tryTableMetadata accumulates try_table metadata during compilation.
-type tryTableMetadata interface {
-	Append(info wazevoapi.TryTableInfo) int
-	Table() []wazevoapi.TryTableInfo
-}
-
-// localTryTableMetadata is the single-threaded implementation.
-type localTryTableMetadata struct {
-	table []wazevoapi.TryTableInfo
-}
-
-func (t *localTryTableMetadata) Append(info wazevoapi.TryTableInfo) int {
-	id := len(t.table)
-	t.table = append(t.table, info)
-	return id
-}
-
-func (t *localTryTableMetadata) Table() []wazevoapi.TryTableInfo {
-	return t.table
-}
-
-// SharedTryTableMetadata is the thread-safe implementation for parallel compilation.
-type SharedTryTableMetadata struct {
-	mu        sync.Mutex
-	table     []wazevoapi.TryTableInfo
-	finalized bool
-}
-
-// NewSharedTryTableMetadata creates a new SharedTryTableMetadata.
-func NewSharedTryTableMetadata() *SharedTryTableMetadata {
-	return &SharedTryTableMetadata{}
-}
-
-func (s *SharedTryTableMetadata) Append(info wazevoapi.TryTableInfo) int {
-	if s.finalized {
-		panic("already finalized")
-	}
-	s.mu.Lock()
-	id := len(s.table)
-	s.table = append(s.table, info)
-	s.mu.Unlock()
-	return id
-}
-
-func (s *SharedTryTableMetadata) Table() []wazevoapi.TryTableInfo {
-	s.finalized = true
-	return s.table
-}
-
-// WithTryTableMetadata replaces the try_table metadata table implementation.
-func (c *Compiler) WithTryTableMetadata(t tryTableMetadata) *Compiler {
-	c.tryTableMetadata = t
-	return c
-}
-
-// TryTableMetadata returns the accumulated try_table metadata.
-func (c *Compiler) TryTableMetadata() []wazevoapi.TryTableInfo {
-	return c.tryTableMetadata.Table()
+// TryTables returns the try_table metadata collected for the function just lowered,
+// indexed by each try_table's ordinal within it. Valid until the next Init.
+func (c *Compiler) TryTables() []wazevoapi.TryTableInfo {
+	return c.tryTables
 }
 
 func (c *Compiler) declareSignatures(listenerOn bool) {
@@ -288,36 +245,29 @@ func (c *Compiler) declareSignatures(listenerOn bool) {
 	}
 	c.ssaBuilder.DeclareSignature(&c.memoryNotifySig)
 
-	c.throwAllocSig = ssa.Signature{
+	c.allocExceptionSig = ssa.Signature{
 		ID:      c.memoryNotifySig.ID + 1,
 		Params:  []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI64 /* tag index */},
 		Results: []ssa.Type{ssa.TypeI64 /* params buffer */},
 	}
-	c.ssaBuilder.DeclareSignature(&c.throwAllocSig)
+	c.ssaBuilder.DeclareSignature(&c.allocExceptionSig)
 
-	c.throwSig = ssa.Signature{
-		ID:      c.throwAllocSig.ID + 1,
-		Params:  []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI64 /* exnref */},
-		Results: []ssa.Type{},
+	c.matchExceptionSig = ssa.Signature{
+		ID:      c.allocExceptionSig.ID + 1,
+		Params:  []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI64 /* try_table ID */},
+		Results: []ssa.Type{ssa.TypeI64 /* matched clause index */, ssa.TypeI64 /* exnref */},
 	}
-	c.ssaBuilder.DeclareSignature(&c.throwSig)
+	c.ssaBuilder.DeclareSignature(&c.matchExceptionSig)
 
-	c.tryTableEnterSig = ssa.Signature{
-		ID:      c.throwSig.ID + 1,
-		Params:  []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI64 /* encoded exit code */},
-		Results: []ssa.Type{},
-	}
-	c.ssaBuilder.DeclareSignature(&c.tryTableEnterSig)
-
-	c.tryTableLeaveSig = ssa.Signature{
-		ID:      c.tryTableEnterSig.ID + 1,
+	c.propagateExceptionSig = ssa.Signature{
+		ID:      c.matchExceptionSig.ID + 1,
 		Params:  []ssa.Type{ssa.TypeI64 /* exec context */},
 		Results: []ssa.Type{},
 	}
-	c.ssaBuilder.DeclareSignature(&c.tryTableLeaveSig)
+	c.ssaBuilder.DeclareSignature(&c.propagateExceptionSig)
 
 	c.exnrefSlotLoadSig = ssa.Signature{
-		ID:      c.tryTableLeaveSig.ID + 1,
+		ID:      c.propagateExceptionSig.ID + 1,
 		Params:  []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI64 /* slot address */},
 		Results: []ssa.Type{ssa.TypeI64 /* exnref */},
 	}
@@ -330,8 +280,15 @@ func (c *Compiler) declareSignatures(listenerOn bool) {
 	}
 	c.ssaBuilder.DeclareSignature(&c.exnrefSlotStoreSig)
 
-	c.exnrefSlotFillSig = ssa.Signature{
+	c.raiseRefSig = ssa.Signature{
 		ID:      c.exnrefSlotStoreSig.ID + 1,
+		Params:  []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI64 /* exnref */},
+		Results: []ssa.Type{},
+	}
+	c.ssaBuilder.DeclareSignature(&c.raiseRefSig)
+
+	c.exnrefSlotFillSig = ssa.Signature{
+		ID:      c.raiseRefSig.ID + 1,
 		Params:  []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI64 /* addr */, ssa.TypeI64 /* exnref */, ssa.TypeI64 /* count */},
 		Results: []ssa.Type{},
 	}
@@ -382,7 +339,11 @@ func (c *Compiler) Init(idx, typIndex wasm.Index, typ *wasm.FunctionType, localT
 	c.wasmFunctionBody = body
 	c.wasmFunctionBodyOffsetInCodeSection = bodyOffsetInCodeSection
 	c.needListener = needListener
-	c.tryTableDepth = 0
+	c.exceptionPropagateBlk = nil
+	c.exceptionPropagateAfterReleaseBlk = nil
+	// nil rather than [:0]: the previous function's slice was handed to the caller and
+	// must not be written through again.
+	c.tryTables = nil
 	c.clearSafeBounds()
 	c.varLengthKnownSafeBoundWithIDPool.Reset()
 	c.knownSafeBoundsAtTheEndOfBlocks = c.knownSafeBoundsAtTheEndOfBlocks[:0]

@@ -3004,7 +3004,7 @@ blk9: () <-- (blk4)
 			b := ssa.NewBuilder()
 
 			offset := wazevoapi.NewModuleContextOffsetData(tc.m, tc.needListener)
-			fc := NewFrontendCompiler(tc.m, b, &offset, tc.ensureTermination, tc.needListener, false)
+			fc := NewFrontendCompiler(tc.m, b, &offset, tc.ensureTermination, tc.needListener, false, false)
 			typeIndex := tc.m.FunctionSection[tc.targetIndex]
 			code := &tc.m.CodeSection[tc.targetIndex]
 			fc.Init(tc.targetIndex, typeIndex, &tc.m.TypeSection[typeIndex], code.LocalTypes, code.Body, tc.needListener, 0)
@@ -3095,14 +3095,14 @@ func TestCompiler_declareSignatures(t *testing.T) {
 			{ID: 9, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI32, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI32}},
 			{ID: 10, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI32}},
 			{ID: 11, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI32}},
-			// EH signatures: throwAlloc, throw, try_table enter and leave, the exnref slot
-			// barriers, the bulk exnref slot barriers, and adjustExnrefs.
+			// EH signatures: throwAlloc, matchException, throw, the exnref slot barriers,
+			// throw_ref, and the bulk exnref slot barriers.
 			{ID: 12, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64}},
-			{ID: 13, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
-			{ID: 14, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
-			{ID: 15, Params: []ssa.Type{ssa.TypeI64}},
-			{ID: 16, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64}},
-			{ID: 17, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
+			{ID: 13, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
+			{ID: 14, Params: []ssa.Type{ssa.TypeI64}},
+			{ID: 15, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64}},
+			{ID: 16, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
+			{ID: 17, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
 			{ID: 18, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
 			{ID: 19, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
 			{ID: 20, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
@@ -3145,14 +3145,14 @@ func TestCompiler_declareSignatures(t *testing.T) {
 			{ID: 17, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI32, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI32}},
 			{ID: 18, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI32}},
 			{ID: 19, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI32}},
-			// EH signatures: throwAlloc, throw, try_table enter and leave, the exnref slot
-			// barriers, the bulk exnref slot barriers, and adjustExnrefs.
+			// EH signatures: throwAlloc, matchException, throw, the exnref slot barriers,
+			// throw_ref, and the bulk exnref slot barriers.
 			{ID: 20, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64}},
-			{ID: 21, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
-			{ID: 22, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
-			{ID: 23, Params: []ssa.Type{ssa.TypeI64}},
-			{ID: 24, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64}},
-			{ID: 25, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
+			{ID: 21, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
+			{ID: 22, Params: []ssa.Type{ssa.TypeI64}},
+			{ID: 23, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}, Results: []ssa.Type{ssa.TypeI64}},
+			{ID: 24, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
+			{ID: 25, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64}},
 			{ID: 26, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
 			{ID: 27, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
 			{ID: 28, Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64}},
@@ -3234,7 +3234,7 @@ func TestKnownSafeBound_valid(t *testing.T) {
 }
 
 func TestCompiler_finalizeKnownSafeBoundsAtTheEndOoBlock(t *testing.T) {
-	c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false)
+	c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false, false)
 	blk := c.ssaBuilder.AllocateBasicBlock()
 	require.True(t, len(c.getKnownSafeBoundsAtTheEndOfBlocks(blk.ID()).View()) == 0)
 	c.ssaBuilder.SetCurrentBlock(blk)
@@ -3255,7 +3255,7 @@ func TestCompiler_finalizeKnownSafeBoundsAtTheEndOoBlock(t *testing.T) {
 
 func TestCompiler_initializeCurrentBlockKnownBounds(t *testing.T) {
 	t.Run("single (sealed)", func(t *testing.T) {
-		c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false)
+		c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false, false)
 		builder := c.ssaBuilder
 		child := builder.AllocateBasicBlock()
 		{
@@ -3286,7 +3286,7 @@ func TestCompiler_initializeCurrentBlockKnownBounds(t *testing.T) {
 		require.Equal(t, ssa.Value(54321), kb.absoluteAddr)
 	})
 	t.Run("single (unsealed)", func(t *testing.T) {
-		c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false)
+		c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false, false)
 		builder := c.ssaBuilder
 		child := builder.AllocateBasicBlock()
 		{
@@ -3316,7 +3316,7 @@ func TestCompiler_initializeCurrentBlockKnownBounds(t *testing.T) {
 		require.NotEqual(t, ssa.Value(54321), kb.absoluteAddr)
 	})
 	t.Run("multiple predecessors", func(t *testing.T) {
-		c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false)
+		c := NewFrontendCompiler(&wasm.Module{}, ssa.NewBuilder(), nil, false, false, false, false)
 		builder := c.ssaBuilder
 		child := builder.AllocateBasicBlock()
 		{

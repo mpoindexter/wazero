@@ -6,7 +6,6 @@ import (
 	"unsafe"
 
 	"github.com/tetratelabs/wazero/internal/testing/require"
-	"github.com/tetratelabs/wazero/internal/wasmdebug"
 )
 
 func TestUnwindStack(t *testing.T) {
@@ -34,7 +33,7 @@ func TestUnwindStack(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stack, exp := tc.setup()
 			bp := uintptr(unsafe.Pointer(&stack[0]))
-			returnAddresses := UnwindStack(0, bp, uintptr(unsafe.Pointer(&stack[len(stack)-1])), nil, wasmdebug.MaxFrames)
+			returnAddresses := UnwindStack(0, bp, uintptr(unsafe.Pointer(&stack[len(stack)-1])), nil)
 			require.Equal(t, exp, returnAddresses)
 		})
 	}

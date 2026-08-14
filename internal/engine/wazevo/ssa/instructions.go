@@ -171,7 +171,7 @@ func (i *Instruction) Prev() *Instruction {
 // IsBranching returns true if this instruction is a branching instruction.
 func (i *Instruction) IsBranching() bool {
 	switch i.opcode {
-	case OpcodeJump, OpcodeBrz, OpcodeBrnz, OpcodeBrTable:
+	case OpcodeJump, OpcodeBrz, OpcodeBrnz, OpcodeBrTable, OpcodeExceptionEdge:
 		return true
 	default:
 		return false
@@ -198,6 +198,16 @@ const (
 	// OpcodeBrTable takes the index value `index`, and branches into `labelX`. If the `index` is out of range,
 	// it branches into the last labelN: `BrTable index, [label1, label2, ... labelN]`.
 	OpcodeBrTable
+
+	// OpcodeExceptionEdge is a phantom/abnormal CFG edge to `blk` that is NEVER taken
+	// at runtime and emits no branch instruction. It exists only so the block layout,
+	// liveness and register allocation treat `blk` (an exception landing pad) as a
+	// real successor of the call site, keeping the landing pad's inputs live there.
+	// The landing pad is entered solely by the runtime writing the instruction
+	// pointer (the table-driven exception model). It may carry block args like a jump
+	// for phi resolution; at branch-lowering it is suppressed and its target address
+	// recorded instead. See OpcodeJump/OpcodeBrnz.
+	OpcodeExceptionEdge
 
 	// OpcodeExitWithCode exit the execution immediately.
 	OpcodeExitWithCode
@@ -800,6 +810,7 @@ var instructionSideEffects = [opcodeEnd]sideEffect{
 	OpcodeBrz:                         sideEffectStrict,
 	OpcodeBrnz:                        sideEffectStrict,
 	OpcodeBrTable:                     sideEffectStrict,
+	OpcodeExceptionEdge:               sideEffectStrict,
 	OpcodeFdiv:                        sideEffectNone,
 	OpcodeFmul:                        sideEffectNone,
 	OpcodeFmax:                        sideEffectNone,
@@ -1001,6 +1012,7 @@ var instructionReturnTypes = [opcodeEnd]returnTypesFn{
 	OpcodeBrz:                         returnTypesFnNoReturns,
 	OpcodeBrnz:                        returnTypesFnNoReturns,
 	OpcodeBrTable:                     returnTypesFnNoReturns,
+	OpcodeExceptionEdge:               returnTypesFnNoReturns,
 	OpcodeUload8:                      returnTypesFnSingle,
 	OpcodeUload16:                     returnTypesFnSingle,
 	OpcodeUload32:                     returnTypesFnSingle,
@@ -2117,7 +2129,7 @@ func (i *Instruction) InvertBrx() {
 // BranchData returns the branch data for this instruction necessary for backends.
 func (i *Instruction) BranchData() (condVal Value, blockArgs []Value, target BasicBlockID) {
 	switch i.opcode {
-	case OpcodeJump:
+	case OpcodeJump, OpcodeExceptionEdge:
 		condVal = ValueInvalid
 	case OpcodeBrz, OpcodeBrnz:
 		condVal = i.v
@@ -2175,6 +2187,16 @@ func (i *Instruction) AsBrz(v Value, args Values, target BasicBlock) {
 func (i *Instruction) AsBrnz(v Value, args Values, target BasicBlock) *Instruction {
 	i.opcode = OpcodeBrnz
 	i.v = v
+	i.vs = args
+	i.rValue = Value(target.ID())
+	return i
+}
+
+// AsExceptionEdge initializes this instruction as a phantom exception edge to target
+// (an abnormal-entry landing pad). args are block args for phi resolution, like a jump.
+// It registers target as a CFG successor but emits no branch (see OpcodeExceptionEdge).
+func (i *Instruction) AsExceptionEdge(args Values, target BasicBlock) *Instruction {
+	i.opcode = OpcodeExceptionEdge
 	i.vs = args
 	i.rValue = Value(target.ID())
 	return i
@@ -2588,6 +2610,14 @@ func (i *Instruction) Format(b Builder) string {
 			vs[idx+2] = view[idx].Format(b)
 		}
 		instSuffix = strings.Join(vs, ", ")
+	case OpcodeExceptionEdge:
+		view := i.vs.View()
+		vs := make([]string, len(view)+1)
+		vs[0] = " " + b.BasicBlock(BasicBlockID(i.rValue)).Name()
+		for idx := range view {
+			vs[idx+1] = view[idx].Format(b)
+		}
+		instSuffix = strings.Join(vs, ", ")
 	case OpcodeBrTable:
 		// `BrTable index, [label1, label2, ... labelN]`
 		instSuffix = fmt.Sprintf(" %s", i.v.Format(b))
@@ -2692,7 +2722,7 @@ func (i *Instruction) Format(b Builder) string {
 // addArgumentBranchInst adds an argument to this instruction.
 func (i *Instruction) addArgumentBranchInst(b *builder, v Value) {
 	switch i.opcode {
-	case OpcodeJump, OpcodeBrz, OpcodeBrnz:
+	case OpcodeJump, OpcodeBrz, OpcodeBrnz, OpcodeExceptionEdge:
 		i.vs = i.vs.Append(&b.varLengthPool, v)
 	default:
 		panic("BUG: " + i.opcode.String())
@@ -2735,6 +2765,8 @@ func (o Opcode) String() (ret string) {
 		return "Brnz"
 	case OpcodeBrTable:
 		return "BrTable"
+	case OpcodeExceptionEdge:
+		return "ExceptionEdge"
 	case OpcodeExitWithCode:
 		return "Exit"
 	case OpcodeExitIfTrueWithCode:

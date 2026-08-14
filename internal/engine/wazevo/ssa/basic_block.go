@@ -217,7 +217,7 @@ func (bb *basicBlock) insertInstruction(b *builder, next *Instruction) {
 	bb.currentInstr = next
 
 	switch next.opcode {
-	case OpcodeJump, OpcodeBrz, OpcodeBrnz:
+	case OpcodeJump, OpcodeBrz, OpcodeBrnz, OpcodeExceptionEdge:
 		target := BasicBlockID(next.rValue)
 		b.basicBlock(target).addPred(bb, next)
 	case OpcodeBrTable:

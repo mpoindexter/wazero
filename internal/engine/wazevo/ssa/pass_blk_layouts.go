@@ -283,6 +283,12 @@ func (b *builder) splitCriticalEdge(pred, succ *basicBlock, predInfo *basicBlock
 		originalBranch.opcode = OpcodeJump // Trampoline consists of one unconditional branch.
 		newBranch.v = originalBranch.v
 		originalBranch.v = ValueInvalid
+	case OpcodeExceptionEdge:
+		// The trampoline is the call-specific exception landing pad: it carries this
+		// edge's reconciliation moves and unconditionally jumps to the dispatch block.
+		// The newBranch (in pred) stays an ExceptionEdge to the trampoline — a phantom
+		// edge that emits no instruction; the runtime enters the trampoline directly.
+		originalBranch.opcode = OpcodeJump
 	default:
 		panic("BUG: critical edge shouldn't be originated from br_table")
 	}

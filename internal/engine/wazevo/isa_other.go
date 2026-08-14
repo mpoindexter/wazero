@@ -12,7 +12,7 @@ func newMachine() backend.Machine {
 
 // unwindStack is a function to unwind the stack, and appends return addresses to `returnAddresses` slice.
 // The implementation must be aligned with the ABI/Calling convention.
-func unwindStack(sp, fp, top uintptr, returnAddresses []uintptr, maxFrames int) []uintptr {
+func unwindStack(sp, fp, top uintptr, returnAddresses []uintptr) []uintptr {
 	panic("unsupported architecture")
 }
 
@@ -21,6 +21,10 @@ func unwindStack(sp, fp, top uintptr, returnAddresses []uintptr, maxFrames int) 
 func goCallStackView(stackPointerBeforeGoCall *uint64) []uint64 {
 	panic("unsupported architecture")
 }
+
+func goCallerReturnAddr(sp, fp uintptr) uintptr { panic("unsupported architecture") }
+func returnAddrAt(sp, fp uintptr) uintptr       { panic("unsupported architecture") }
+func setReturnAddrAt(sp, fp, a uintptr)         { panic("unsupported architecture") }
 
 // adjustClonedStack is a function to adjust the stack after it is grown.
 // More precisely, absolute addresses (frame pointers) in the stack must be adjusted.
