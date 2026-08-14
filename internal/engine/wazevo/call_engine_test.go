@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/tetratelabs/wazero/internal/engine/wazevo/wazevoapi"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
@@ -73,7 +74,6 @@ func TestCallEngine_collectGarbage(t *testing.T) {
 	var store wasm.ExceptionStore
 	newExn := func() *wasm.Exception { return store.NewException(nil, nil, nil) }
 	onStack, onStackOffWord, inRegister, belowSP, unnamed := newExn(), newExn(), newExn(), newExn(), newExn()
-	inSaveArea, onHandlerStack, inHandlerRegister := newExn(), newExn(), newExn()
 
 	// fakeStack is a stack whose stack pointer, at index sp, is 16-byte aligned.
 	fakeStack := func() (stack []byte, sp int) {
@@ -93,42 +93,48 @@ func TestCallEngine_collectGarbage(t *testing.T) {
 	binary.LittleEndian.PutUint64(c.stack[sp-16:], uint64(belowSP.ID))
 	c.execCtx.savedRegisters[5][0] = uint64(inRegister.ID)
 
-	// A try handler: what a catch would resume with, which is not what is live now.
-	h := tryHandler{localsSaveArea: []uint64{7, 0, uint64(inSaveArea.ID), 0}}
-	h.stack, sp = fakeStack()
-	h.sp, h.top = uintptr(unsafe.Pointer(&h.stack[sp])), alignedStackTop(h.stack)
-	binary.LittleEndian.PutUint64(h.stack[sp+32:], uint64(onHandlerStack.ID))
-	binary.LittleEndian.PutUint64(h.stack[sp-8:], uint64(belowSP.ID))
-	h.savedRegisters[3][1] = uint64(inHandlerRegister.ID)
-	c.tryHandlers = []tryHandler{h}
-
-	for _, e := range []*wasm.Exception{
-		onStack, onStackOffWord, inRegister, belowSP, unnamed, inSaveArea, onHandlerStack, inHandlerRegister,
-	} {
+	for _, e := range []*wasm.Exception{onStack, onStackOffWord, inRegister, belowSP, unnamed} {
 		c.holdException(e)
 	}
 	c.collectGarbage()
 
 	require.Equal(t, map[wasm.Reference]*wasm.Exception{
-		onStack.ID:           onStack,
-		onStackOffWord.ID:    onStackOffWord,
-		inRegister.ID:        inRegister,
-		inSaveArea.ID:        inSaveArea,
-		onHandlerStack.ID:    onHandlerStack,
-		inHandlerRegister.ID: inHandlerRegister,
+		onStack.ID:        onStack,
+		onStackOffWord.ID: onStackOffWord,
+		inRegister.ID:     inRegister,
 	}, c.heldExceptions)
 
 	// Collecting again reuses the map the last collection replaced, and must not disturb
 	// what it keeps.
 	c.collectGarbage()
-	require.Equal(t, 6, len(c.heldExceptions))
+	require.Equal(t, 3, len(c.heldExceptions))
+}
 
-	// Once the handler is gone, so is what only it named.
-	c.tryHandlers = nil
-	c.collectGarbage()
-	require.Equal(t, map[wasm.Reference]*wasm.Exception{
-		onStack.ID:        onStack,
-		onStackOffWord.ID: onStackOffWord,
-		inRegister.ID:     inRegister,
-	}, c.heldExceptions)
+func Test_findLandingPad(t *testing.T) {
+	tbl := []wazevoapi.ExceptionTableEntry{
+		{CallBlockStart: 10, LandingPad: 100},
+		{CallBlockStart: 20, LandingPad: 200},
+		{CallBlockStart: 30, LandingPad: 300},
+	}
+	for _, tc := range []struct {
+		name  string
+		tbl   []wazevoapi.ExceptionTableEntry
+		relPC uint32
+		pad   uint32
+		ok    bool
+	}{
+		{"empty table", nil, 0, 0, false},
+		{"before the first entry", tbl, 9, 0, false},
+		{"exactly the first entry", tbl, 10, 100, true},
+		{"inside the first entry", tbl, 19, 100, true},
+		{"exactly a middle entry", tbl, 20, 200, true},
+		{"exactly the last entry", tbl, 30, 300, true},
+		{"past the last entry", tbl, 1 << 20, 300, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pad, ok := findLandingPad(tc.tbl, tc.relPC)
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.pad, pad)
+		})
+	}
 }

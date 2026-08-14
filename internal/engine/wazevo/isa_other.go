@@ -22,6 +22,10 @@ func goCallStackView(stackPointerBeforeGoCall *uint64) []uint64 {
 	panic("unsupported architecture")
 }
 
+func goCallerReturnAddr(sp, fp uintptr) uintptr { panic("unsupported architecture") }
+func returnAddrAt(sp, fp uintptr) uintptr       { panic("unsupported architecture") }
+func setReturnAddrAt(sp, fp, a uintptr)         { panic("unsupported architecture") }
+
 // adjustClonedStack is a function to adjust the stack after it is grown.
 // More precisely, absolute addresses (frame pointers) in the stack must be adjusted.
 func adjustClonedStack(oldsp, oldTop, sp, fp, top uintptr) {

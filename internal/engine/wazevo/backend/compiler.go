@@ -1,8 +1,10 @@
 package backend
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/tetratelabs/wazero/internal/engine/wazevo/backend/regalloc"
 	"github.com/tetratelabs/wazero/internal/engine/wazevo/ssa"
@@ -96,6 +98,15 @@ type Compiler interface {
 	// SourceOffsetInfo returns the source offset information for the current buffer offset.
 	SourceOffsetInfo() []SourceOffsetInfo
 
+	// RecordExceptionEdge records a table-driven-EH phantom edge: callBlock is the block
+	// ending in an OpcodeExceptionEdge, landingPad is its (post-split) target. Called
+	// during branch lowering; resolved to offsets by ExceptionTable after Compile.
+	RecordExceptionEdge(callBlock, landingPad ssa.BasicBlockID)
+
+	// ExceptionTable resolves the recorded exception edges to function-relative
+	// executable offsets. Valid only after Compile (binary offsets resolved).
+	ExceptionTable() []wazevoapi.ExceptionTableEntry
+
 	// EmitByte appends a byte to the buffer. Used during the code emission.
 	EmitByte(b byte)
 
@@ -107,6 +118,12 @@ type Compiler interface {
 
 	// GetFunctionABI returns the ABI information for the given signature.
 	GetFunctionABI(sig *ssa.Signature) *FunctionABI
+}
+
+// exceptionEdge is a recorded (call block, post-split landing-pad block) pair,
+// resolved to offsets by ExceptionTable.
+type exceptionEdge struct {
+	callBlock, landingPad ssa.BasicBlockID
 }
 
 // RelocationInfo represents the relocation information for a call instruction.
@@ -145,6 +162,7 @@ type compiler struct {
 	buf             []byte
 	relocations     []RelocationInfo
 	sourceOffsets   []SourceOffsetInfo
+	exceptionEdges  []exceptionEdge
 	// abis maps ssa.SignatureID to the ABI implementation.
 	abis                           []FunctionABI
 	argResultInts, argResultFloats []regalloc.RealReg
@@ -276,6 +294,31 @@ func (c *compiler) Init() {
 	c.buf = c.buf[:0]
 	c.sourceOffsets = c.sourceOffsets[:0]
 	c.relocations = c.relocations[:0]
+	c.exceptionEdges = c.exceptionEdges[:0]
+}
+
+// RecordExceptionEdge implements Compiler.RecordExceptionEdge.
+func (c *compiler) RecordExceptionEdge(callBlock, landingPad ssa.BasicBlockID) {
+	c.exceptionEdges = append(c.exceptionEdges, exceptionEdge{callBlock: callBlock, landingPad: landingPad})
+}
+
+// ExceptionTable implements Compiler.ExceptionTable.
+func (c *compiler) ExceptionTable() []wazevoapi.ExceptionTableEntry {
+	if len(c.exceptionEdges) == 0 {
+		return nil
+	}
+	tbl := make([]wazevoapi.ExceptionTableEntry, 0, len(c.exceptionEdges))
+	for _, e := range c.exceptionEdges {
+		tbl = append(tbl, wazevoapi.ExceptionTableEntry{
+			CallBlockStart: uint32(c.mach.BlockBinaryOffset(e.callBlock)),
+			LandingPad:     uint32(c.mach.BlockBinaryOffset(e.landingPad)),
+		})
+	}
+	// Sort by CallBlockStart so the runtime can binary-search.
+	slices.SortFunc(tbl, func(a, b wazevoapi.ExceptionTableEntry) int {
+		return cmp.Compare(a.CallBlockStart, b.CallBlockStart)
+	})
+	return tbl
 }
 
 // ValueDefinition implements Compiler.ValueDefinition.

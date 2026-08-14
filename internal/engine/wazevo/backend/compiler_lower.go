@@ -50,7 +50,7 @@ func (c *compiler) lowerBlock(blk ssa.BasicBlock) {
 	}
 
 	if br0 != nil {
-		c.lowerBranches(br0, br1)
+		c.lowerBranches(blk, br0, br1)
 	}
 
 	if br1 != nil && br0 == nil {
@@ -90,16 +90,26 @@ func (c *compiler) lowerBlock(blk ssa.BasicBlock) {
 // At least br0 is not nil, but br1 can be nil if there's no branching before br0.
 //
 // See ssa.Instruction IsBranching, and the comment on ssa.BasicBlock.
-func (c *compiler) lowerBranches(br0, br1 *ssa.Instruction) {
+func (c *compiler) lowerBranches(blk ssa.BasicBlock, br0, br1 *ssa.Instruction) {
 	mach := c.mach
 
 	c.setCurrentGroupID(br0.GroupID())
 	c.mach.LowerSingleBranch(br0)
 	mach.FlushPendingInstructions()
 	if br1 != nil {
-		c.setCurrentGroupID(br1.GroupID())
-		c.mach.LowerConditionalBranch(br1)
-		mach.FlushPendingInstructions()
+		if br1.Opcode() == ssa.OpcodeExceptionEdge {
+			// Table-driven exception landing pad: a phantom edge that emits no branch.
+			// It exists only for layout/liveness/regalloc; the landing pad is entered
+			// by the runtime writing the IP on throw. Record (call block -> landing pad
+			// block) so the per-function exception table maps the call's return PC to
+			// the landing-pad PC after offsets are resolved.
+			_, _, target := br1.BranchData()
+			c.RecordExceptionEdge(blk.ID(), target)
+		} else {
+			c.setCurrentGroupID(br1.GroupID())
+			c.mach.LowerConditionalBranch(br1)
+			mach.FlushPendingInstructions()
+		}
 	}
 
 	if br0.Opcode() == ssa.OpcodeJump {

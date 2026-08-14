@@ -7,6 +7,7 @@ import (
 	"github.com/tetratelabs/wazero/internal/engine/wazevo/backend"
 	"github.com/tetratelabs/wazero/internal/engine/wazevo/backend/regalloc"
 	"github.com/tetratelabs/wazero/internal/engine/wazevo/ssa"
+	"github.com/tetratelabs/wazero/internal/engine/wazevo/wazevoapi"
 )
 
 func newSetupWithMockContext() (*mockCompiler, ssa.Builder, *machine) {
@@ -42,7 +43,9 @@ func (m *mockCompiler) SSABuilder() ssa.Builder { return nil }
 
 func (m *mockCompiler) LoopNestingForestRoots() []ssa.BasicBlock { panic("TODO") }
 
-func (m *mockCompiler) SourceOffsetInfo() []backend.SourceOffsetInfo { return nil }
+func (m *mockCompiler) SourceOffsetInfo() []backend.SourceOffsetInfo    { return nil }
+func (m *mockCompiler) RecordExceptionEdge(_, _ ssa.BasicBlockID)       {}
+func (m *mockCompiler) ExceptionTable() []wazevoapi.ExceptionTableEntry { return nil }
 
 func (m *mockCompiler) AddSourceOffsetInfo(int64, ssa.SourceOffset) {}
 

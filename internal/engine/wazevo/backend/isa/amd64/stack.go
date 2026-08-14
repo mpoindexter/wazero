@@ -77,6 +77,41 @@ func GoCallStackView(stackPointerBeforeGoCall *uint64) []uint64 {
 	return unsafe.Slice((*uint64)(data), size)
 }
 
+// retSlot returns a 1-element view over the saved-return-address slot of the frame whose
+// frame pointer (RBP) is `rbp`. In the standard amd64 frame the return address sits at
+// RBP+8 — the slot its `ret` pops.
+func retSlot(rbp uintptr) []uintptr {
+	var slot []uintptr
+	{
+		//nolint:staticcheck
+		hdr := (*reflect.SliceHeader)(unsafe.Pointer(&slot))
+		hdr.Data = rbp + 8
+		hdr.Len = 1
+		hdr.Cap = 1
+	}
+	return slot
+}
+
+// ReturnAddrAt returns the saved return address of the frame whose frame pointer is `rbp`.
+func ReturnAddrAt(rbp uintptr) uintptr { return retSlot(rbp)[0] }
+
+// SetReturnAddrAt overwrites the saved return address of the frame whose frame pointer is `rbp`.
+func SetReturnAddrAt(rbp uintptr, addr uintptr) { retSlot(rbp)[0] = addr }
+
+// CallerRBP returns the caller's frame pointer (Caller_RBP, saved at [rbp]) of the frame
+// whose frame pointer is `rbp`.
+func CallerRBP(rbp uintptr) uintptr {
+	var caller []uintptr
+	{
+		//nolint:staticcheck
+		hdr := (*reflect.SliceHeader)(unsafe.Pointer(&caller))
+		hdr.Data = rbp
+		hdr.Len = 1
+		hdr.Cap = 1
+	}
+	return caller[0]
+}
+
 func AdjustClonedStack(oldRsp, oldTop, rsp, rbp, top uintptr) {
 	diff := uint64(rsp - oldRsp)
 

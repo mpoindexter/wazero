@@ -445,8 +445,8 @@ func TestMachine_CompileGoFunctionTrampoline(t *testing.T) {
 `,
 		},
 		{
-			name:     "try_table_enter",
-			exitCode: wazevoapi.ExitCodeTryTableEnter,
+			name:     "match_exception",
+			exitCode: wazevoapi.ExitCodeMatchException,
 			sig: &ssa.Signature{
 				Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI64},
 				Results: []ssa.Type{},

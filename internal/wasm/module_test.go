@@ -1115,9 +1115,9 @@ func TestModule_declaredFunctionIndexes(t *testing.T) {
 }
 
 func TestModule_AssignModuleID(t *testing.T) {
-	getID := func(bin []byte, lsns []experimental.FunctionListener, withEnsureTermination bool) ModuleID {
+	getID := func(bin []byte, lsns []experimental.FunctionListener, withEnsureTermination, withExceptionHandling bool) ModuleID {
 		m := Module{}
-		m.AssignModuleID(bin, lsns, withEnsureTermination)
+		m.AssignModuleID(bin, lsns, withEnsureTermination, withExceptionHandling)
 		return m.ID
 	}
 
@@ -1128,10 +1128,21 @@ func TestModule_AssignModuleID(t *testing.T) {
 	for i, tc := range []struct {
 		bin                   []byte
 		withEnsureTermination bool
+		withExceptionHandling bool
 		listeners             []experimental.FunctionListener
 	}{
 		{bin: []byte{1, 2, 3}, withEnsureTermination: false},
 		{bin: []byte{1, 2, 3}, withEnsureTermination: true},
+		// Exception handling changes what the compilers emit for every call site, so it has
+		// to reach the ID: otherwise a cached module compiled without it is handed to an
+		// engine that has it on, and the calls it holds have no landing pads.
+		{bin: []byte{1, 2, 3}, withExceptionHandling: true},
+		{bin: []byte{1, 2, 3}, withEnsureTermination: true, withExceptionHandling: true},
+		{
+			bin:                   []byte{1, 2, 3},
+			listeners:             []experimental.FunctionListener{ml},
+			withExceptionHandling: true,
+		},
 		{
 			bin:                   []byte{1, 2, 3},
 			listeners:             []experimental.FunctionListener{ml},
@@ -1185,7 +1196,7 @@ func TestModule_AssignModuleID(t *testing.T) {
 			withEnsureTermination: false,
 		},
 	} {
-		id := getID(tc.bin, tc.listeners, tc.withEnsureTermination)
+		id := getID(tc.bin, tc.listeners, tc.withEnsureTermination, tc.withExceptionHandling)
 		_, exist := exists[id]
 		require.False(t, exist, i)
 		exists[id] = struct{}{}

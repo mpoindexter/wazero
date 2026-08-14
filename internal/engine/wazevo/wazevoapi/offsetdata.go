@@ -56,10 +56,10 @@ const (
 	// ExecutionContextOffsetThrowAllocTrampolineAddress is the address of the
 	// throw-alloc trampoline, which allocates the Exception heap object,
 	// sets exceptionParamsPtr, and returns the exnref.
-	ExecutionContextOffsetThrowAllocTrampolineAddress    Offset = 1184
-	ExecutionContextOffsetThrowTrampolineAddress         Offset = 1192
-	ExecutionContextOffsetTryTableEnterTrampolineAddress Offset = 1200
-	ExecutionContextOffsetTryTableLeaveTrampolineAddress Offset = 1208
+	ExecutionContextOffsetThrowAllocTrampolineAddress         Offset = 1184
+	ExecutionContextOffsetThrowTrampolineAddress              Offset = 1192
+	ExecutionContextOffsetMatchExceptionTrampolineAddress     Offset = 1200
+	ExecutionContextOffsetPropagateExceptionTrampolineAddress Offset = 1208
 	// ExecutionContextOffsetExceptionRef holds the reference to the Exception struct,
 	// used on the throw side and by catch_ref/catch_all_ref handlers.
 	ExecutionContextOffsetExceptionRef Offset = 1216
@@ -68,26 +68,22 @@ const (
 	// catch (load params) sides.
 	ExecutionContextOffsetExceptionParamsPtr Offset = 1224
 	// ExecutionContextOffsetCaughtExceptionClauseIdx is the matched catch clause index
-	// written by handleException and read by compiled handler dispatch code.
+	// written by matchException and read by compiled handler dispatch code.
 	ExecutionContextOffsetCaughtExceptionClauseIdx Offset = 1232
-	// ExecutionContextOffsetLocalsSaveAreaPtr points to a heap-allocated buffer
-	// where locals are mirrored inside try_table bodies, so that handler blocks
-	// can read throw-time local values after stack-clone restore.
-	ExecutionContextOffsetLocalsSaveAreaPtr Offset = 1240
 	// ExecutionContextOffsetMemclrAddress is the offset of `memclrAddress` in executionContext.
-	ExecutionContextOffsetMemclrAddress Offset = 1248
+	ExecutionContextOffsetMemclrAddress Offset = 1240
 	// ExecutionContextOffsetExnrefSlotLoadTrampolineAddress is the address of the read
 	// barrier compiled code calls to access an exnref-typed global or table slot.
-	ExecutionContextOffsetExnrefSlotLoadTrampolineAddress Offset = 1256
+	ExecutionContextOffsetExnrefSlotLoadTrampolineAddress Offset = 1248
 	// ExecutionContextOffsetExnrefSlotStoreTrampolineAddress is the address of the write
 	// barrier compiled code calls to access an exnref-typed global or table slot.
-	ExecutionContextOffsetExnrefSlotStoreTrampolineAddress Offset = 1264
+	ExecutionContextOffsetExnrefSlotStoreTrampolineAddress Offset = 1256
 	// ExecutionContextOffsetExnrefSlotFillTrampolineAddress is the address of the barrier
 	// over a run of exnref-typed table slots, which table.fill writes.
-	ExecutionContextOffsetExnrefSlotFillTrampolineAddress Offset = 1272
+	ExecutionContextOffsetExnrefSlotFillTrampolineAddress Offset = 1264
 	// ExecutionContextOffsetExnrefSlotCopyTrampolineAddress is the address of the barrier
 	// over a run of exnref-typed table slots copied from elsewhere.
-	ExecutionContextOffsetExnrefSlotCopyTrampolineAddress Offset = 1280
+	ExecutionContextOffsetExnrefSlotCopyTrampolineAddress Offset = 1272
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,
