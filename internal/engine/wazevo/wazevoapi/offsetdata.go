@@ -74,6 +74,11 @@ const (
 	// where locals are mirrored inside try_table bodies, so that handler blocks
 	// can read throw-time local values after stack-clone restore.
 	ExecutionContextOffsetLocalsSaveAreaPtr Offset = 1240
+	// ExecutionContextOffsetModuleClosedPtr is the offset of `moduleClosedPtr`
+	// (a *uint64 pointing to ModuleInstance.Closed's underlying value).
+	// Read by compiled code at every loop back-edge when ensureTermination is on:
+	// load the pointer, then load the uint64 it points to, branch if non-zero.
+	ExecutionContextOffsetModuleClosedPtr Offset = 1248
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

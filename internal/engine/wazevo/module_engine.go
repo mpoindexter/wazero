@@ -221,6 +221,8 @@ func (m *moduleEngine) NewFunction(index wasm.Index) api.Function {
 	ce.execCtx.tryTableEnterTrampolineAddress = sharedFunctions.tryTableEnterAddress
 	ce.execCtx.tryTableLeaveTrampolineAddress = sharedFunctions.tryTableLeaveAddress
 	ce.execCtx.memmoveAddress = memmovPtr
+	ce.execCtx.moduleClosedPtr = (*uint64)(unsafe.Pointer(&m.module.Closed))
+	ce.entrypoint, ce.afterGoFunctionCallEntrypoint = entrypoints(p.ensureTermination)
 	ce.init()
 	return ce
 }
