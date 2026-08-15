@@ -53,6 +53,11 @@ type (
 		// thrown is the raise this call is propagating, and is nil when it is not
 		// propagating one. A call that never throws never allocates it.
 		thrown *thrownException
+		// entrypoint and afterGoFunctionCallEntrypoint are how this call enters compiled
+		// code. Which pair they hold depends on whether the module was compiled with
+		// ensureTermination: see entrypoints.
+		entrypoint                    entrypointFn
+		afterGoFunctionCallEntrypoint afterGoFunctionCallEntrypointFn
 	}
 
 	// exceptionRefs is an exception and the number of references to it in this call. The table
@@ -166,6 +171,11 @@ type (
 		// collected while it does -- a pointer to an object's first word keeps the whole
 		// object alive.
 		caughtExceptionParams *uint64
+		// moduleClosedPtr is a pointer to the underlying uint64 of the
+		// owning ModuleInstance.Closed field. Compiled code reads through it
+		// at every loop back-edge (when ensureTermination is on) and calls
+		// back into Go when non-zero.
+		moduleClosedPtr *uint64
 	}
 )
 
@@ -525,7 +535,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 	if c.stackTop&(16-1) != 0 {
 		panic("BUG: stack must be aligned to 16 bytes")
 	}
-	entrypoint(c.preambleExecutable, c.executable, c.execCtxPtr, c.parent.opaquePtr, paramResultPtr, c.stackTop)
+	c.entrypoint(c.preambleExecutable, c.executable, c.execCtxPtr, c.parent.opaquePtr, paramResultPtr, c.stackTop)
 	for {
 		switch ec := c.execCtx.exitCode; ec & wazevoapi.ExitCodeMask {
 		case wazevoapi.ExitCodeOK:
@@ -560,7 +570,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			// Old stack must be alive until the new stack is adjusted.
 			runtime.KeepAlive(oldStack)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr, newsp, newfp)
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr, newsp, newfp)
 		case wazevoapi.ExitCodeGrowMemory:
 			mod := c.callerModuleInstance()
 			mem := mod.MemoryInstance
@@ -572,7 +582,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 				*argRes = uint64(res)
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr, uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr, uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeTableGrow:
 			mod := c.callerModuleInstance()
 			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
@@ -594,7 +604,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 				c.releaseIfHeld(ref) // the operand, whether or not the grow succeeded.
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeCallGoFunction:
 			index := wazevoapi.GoFunctionIndexFromExitCode(ec)
@@ -607,7 +617,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			}()
 			// Back to the native code.
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeCallGoFunctionWithListener:
 			index := wazevoapi.GoFunctionIndexFromExitCode(ec)
@@ -631,7 +641,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			listener.After(ctx, callerModule, def, s)
 			// Back to the native code.
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeCallGoModuleFunction:
 			index := wazevoapi.GoFunctionIndexFromExitCode(ec)
@@ -645,7 +655,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			}()
 			// Back to the native code.
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeCallGoModuleFunctionWithListener:
 			index := wazevoapi.GoFunctionIndexFromExitCode(ec)
@@ -669,7 +679,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			listener.After(ctx, callerModule, def, s)
 			// Back to the native code.
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeCallListenerBefore:
 			stack := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
@@ -679,7 +689,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			def := mod.Source.FunctionDefinition(index + mod.Source.ImportFunctionCount)
 			listener.Before(ctx, mod, def, stack[1:], c.stackIterator(false))
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeCallListenerAfter:
 			stack := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
@@ -689,7 +699,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			def := mod.Source.FunctionDefinition(index + mod.Source.ImportFunctionCount)
 			listener.After(ctx, mod, def, stack[1:])
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeCheckModuleExitCode:
 			// Note: this operation must be done in Go, not native code. The reason is that
@@ -699,7 +709,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 				panic(err)
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeRefFunc:
 			mod := c.callerModuleInstance()
@@ -708,7 +718,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			ref := mod.Engine.FunctionInstanceReference(funcIndex)
 			s[0] = uint64(ref)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeMemoryWait32:
 			mod := c.callerModuleInstance()
@@ -728,7 +738,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			})
 			s[0] = res
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeMemoryWait64:
 			mod := c.callerModuleInstance()
@@ -748,7 +758,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			})
 			s[0] = uint64(res)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeMemoryNotify:
 			mod := c.callerModuleInstance()
@@ -760,7 +770,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			res := mem.Notify(offset, count)
 			s[0] = uint64(res)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeUnreachable:
 			panic(wasmruntime.ErrRuntimeUnreachable)
@@ -796,7 +806,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			c.thrown = t
 			s[0] = uint64(uintptr(unsafe.Pointer(unsafe.SliceData(t.params))))
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeMatchException:
 			// matchException trampoline: (execCtx, tryTableID) → (clauseIdx, exnref).
@@ -874,7 +884,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			s[0] = uint64(clauseIdx)
 			s[1] = uint64(handle)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeThrow:
 			// Unwind the in-flight exception one frame: redirect the propagating frame's
@@ -901,7 +911,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 				// pending exception becomes ErrRuntimeUncaughtException.
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr, sp, fp)
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr, sp, fp)
 		case wazevoapi.ExitCodeRaiseRef:
 			// throw_ref trampoline: (execCtx, exnref). Records what guest code is raising
 			// as the exception in flight, which every raise does before transferring
@@ -923,7 +933,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			// a handler that catches it takes a fresh reference.
 			c.releaseIfHeld(wasm.Reference(s[0]))
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeExnrefSlotFill:
 			// (execCtx, slot address, exnref, count): every slot the fill covers becomes a
@@ -937,7 +947,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			// One operand, one reference, however many slots it filled.
 			c.releaseIfHeld(handle)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeExnrefSlotCopy:
 			// (execCtx, destination address, source address, count), for table.copy and
@@ -956,7 +966,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 					(*wasm.Reference)(unsafe.Add(unsafe.Pointer(dst), uintptr(i)*8)), &moved[i])
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeExnrefSlotLoad:
 			// Read barrier: (execCtx, slot address) → exnref. What the slot names becomes
@@ -966,7 +976,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			slot := *(**wasm.Reference)(unsafe.Pointer(&s[0]))
 			s[0] = uint64(c.loadExnrefSlot(slot))
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeExnrefSlotStore:
 			// Write barrier: (execCtx, slot address, exnref). The slot becomes a durable
@@ -975,7 +985,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			slot := *(**wasm.Reference)(unsafe.Pointer(&s[0]))
 			c.storeExnrefSlot(slot, wasm.Reference(s[1]))
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeAdjustExnrefs:
 			// (execCtx, handle gaining a reference, handle losing one). Compiled code skips
@@ -994,7 +1004,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 				c.releaseException(dec)
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+			c.afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		case wazevoapi.ExitCodeNullReference:
 			panic(wasmruntime.ErrRuntimeNullReference)

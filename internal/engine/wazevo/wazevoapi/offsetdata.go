@@ -81,6 +81,11 @@ const (
 	// (a *uint64), the address of the params of the exception a handler was just entered
 	// for. A load at this offset yields the address the handler reads the param values from.
 	ExecutionContextOffsetCaughtExceptionParams Offset = 1256
+	// ExecutionContextOffsetModuleClosedPtr is the offset of `moduleClosedPtr`
+	// (a *uint64 pointing to ModuleInstance.Closed's underlying value).
+	// Read by compiled code at every loop back-edge when ensureTermination is on:
+	// load the pointer, then load the uint64 it points to, branch if non-zero.
+	ExecutionContextOffsetModuleClosedPtr Offset = 1264
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

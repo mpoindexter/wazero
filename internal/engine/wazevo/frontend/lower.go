@@ -62,6 +62,10 @@ type (
 		// dispatch/handler blocks are only materialized if the body can raise.
 		tryTableOrdinal int
 		catches         []resolvedCatch
+		// moduleClosedBlk is where a loop's module-closed check branches when the flag
+		// is set, and is nil unless this is a loop compiled with ensureTermination. It
+		// is only filled in at the loop's End: see lowerModuleClosed.
+		moduleClosedBlk ssa.BasicBlock
 	}
 
 	// resolvedCatch is a try_table catch clause with its branch target resolved.
@@ -1476,6 +1480,11 @@ func (c *Compiler) lowerCurrentOpcode() {
 		c.addBlockParamsFromWasmTypes(bt.Params, loopHeader)
 		c.addBlockParamsFromWasmTypes(bt.Results, afterLoopBlock)
 
+		var moduleClosedBlk ssa.BasicBlock
+		if c.ensureTermination {
+			moduleClosedBlk = builder.AllocateBasicBlock()
+		}
+
 		originalLen := len(state.values) - len(bt.Params)
 		state.ctrlPush(controlFrame{
 			originalStackLenWithoutParam: originalLen,
@@ -1483,6 +1492,7 @@ func (c *Compiler) lowerCurrentOpcode() {
 			blk:                          loopHeader,
 			followingBlock:               afterLoopBlock,
 			blockType:                    bt,
+			moduleClosedBlk:              moduleClosedBlk,
 		})
 
 		args := c.nPeekDup(len(bt.Params))
@@ -1495,16 +1505,39 @@ func (c *Compiler) lowerCurrentOpcode() {
 		c.switchTo(originalLen, loopHeader, bt.Params)
 
 		if c.ensureTermination {
-			checkModuleExitCodePtr := builder.AllocateInstruction().
+			// Cheap inline check: load moduleClosedPtr from execCtx, then load the
+			// ModuleInstance.Closed it points to. If zero, fall through to the loop
+			// body. If non-zero (set by the cancellation watchdog OR by an explicit
+			// module.Close from another goroutine), branch out to moduleClosedBlk,
+			// which re-enters Go to report the error.
+			//
+			// Neither load needs atomic semantics. The pointer is written once at
+			// callEngine setup; the flag is a single aligned word that only ever goes
+			// from zero to non-zero, so the worst a racing close can cost is being
+			// noticed an iteration later.
+			closedPtr := builder.AllocateInstruction().
 				AsLoad(c.execCtxPtrValue,
-					wazevoapi.ExecutionContextOffsetCheckModuleExitCodeTrampolineAddress.U32(),
+					wazevoapi.ExecutionContextOffsetModuleClosedPtr.U32(),
 					ssa.TypeI64,
 				).Insert(builder).Return()
+			closed := builder.AllocateInstruction().
+				AsLoad(closedPtr, 0, ssa.TypeI64).Insert(builder).Return()
 
-			args := c.allocateVarLengthValues(1, c.execCtxPtrValue)
+			// The header ends here, so the body needs a block of its own. Neither edge
+			// carries arguments: this header is the only predecessor of either block,
+			// so the loop's params are still live and unambiguous in both without
+			// being passed.
+			loopBody := builder.AllocateBasicBlock()
 			builder.AllocateInstruction().
-				AsCallIndirect(checkModuleExitCodePtr, &c.checkModuleExitCodeSig, args).
+				AsBrnz(closed, ssa.ValuesNil, moduleClosedBlk).
 				Insert(builder)
+			c.insertJumpToBlock(ssa.ValuesNil, loopBody)
+
+			// Lower the rest of the loop body in loopBody. The value stack still holds
+			// loopHeader's params, which are the same values there: the header
+			// dominates the body.
+			builder.SetCurrentBlock(loopBody)
+			builder.Seal(loopBody)
 		}
 	case wasm.OpcodeIf:
 		bt := c.readBlockType()
@@ -1607,6 +1640,9 @@ func (c *Compiler) lowerCurrentOpcode() {
 				}
 			}
 		case controlFrameKindLoop:
+			if ctrl.moduleClosedBlk != nil {
+				c.lowerModuleClosed(&ctrl)
+			}
 			// Loop header block can be reached from any br/br_table contained in the loop,
 			// so now that we've reached End of it, we can seal it.
 			builder.Seal(ctrl.blk)
@@ -5483,6 +5519,42 @@ func (c *Compiler) insertJumpToBlock(args ssa.Values, targetBlk ssa.BasicBlock) 
 	jmp := builder.AllocateInstruction()
 	jmp.AsJump(args, targetBlk)
 	builder.InsertInstruction(jmp)
+}
+
+// lowerModuleClosed fills in the block a loop's module-closed check branches to when it finds
+// the flag set. It calls back into Go, which fails the call with the module's exit code, and
+// jumps back to the check for the case where the module turns out not to be closed after all
+// and the call returns. Going back to the check rather than into the body is what leaves the
+// body with a single predecessor, and so with no block parameters.
+//
+// This runs at the loop's End, not where the check is emitted, because block layout follows
+// the order blocks were first written to: written last, this one lands after the whole loop,
+// and the check falls through into the body instead of branching to it.
+func (c *Compiler) lowerModuleClosed(ctrl *controlFrame) {
+	builder := c.ssaBuilder
+	builder.SetCurrentBlock(ctrl.moduleClosedBlk)
+
+	checkModuleExitCodePtr := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue,
+			wazevoapi.ExecutionContextOffsetCheckModuleExitCodeTrampolineAddress.U32(),
+			ssa.TypeI64,
+		).Insert(builder).Return()
+	builder.AllocateInstruction().
+		AsCallIndirect(checkModuleExitCodePtr, &c.checkModuleExitCodeSig,
+			c.allocateVarLengthValues(1, c.execCtxPtrValue)).
+		Insert(builder)
+
+	// The loop header is still unsealed, so its parameters are still only the loop's own:
+	// the ones any local read inside the body needs are added when it is sealed, just
+	// after this, and this branch gets its arguments for them then, like every other
+	// predecessor does.
+	loopHeader := ctrl.blk
+	backArgs := c.allocateVarLengthValues(loopHeader.Params())
+	for i := 0; i < loopHeader.Params(); i++ {
+		backArgs = backArgs.Append(builder.VarLengthPool(), loopHeader.Param(i))
+	}
+	c.insertJumpToBlock(backArgs, loopHeader)
+	builder.Seal(ctrl.moduleClosedBlk)
 }
 
 // insertIntegerExtend widens the operand from a from-bit value to a to-typed one. to is the
