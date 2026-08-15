@@ -226,6 +226,8 @@ func (m *moduleEngine) NewFunction(index wasm.Index) api.Function {
 	ce.execCtx.exnrefSlotCopyTrampolineAddress = sharedFunctions.exnrefSlotCopyAddress
 	ce.execCtx.memmoveAddress = memmovPtr
 	ce.execCtx.memclrAddress = memclrPtr
+	ce.execCtx.moduleClosedPtr = (*uint64)(unsafe.Pointer(&m.module.Closed))
+	ce.entrypoint, ce.afterGoFunctionCallEntrypoint = entrypoints(p.ensureTermination)
 	ce.init()
 	return ce
 }
