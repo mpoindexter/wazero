@@ -1,0 +1,54 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGCPauseWithSpinningGuests/no_guests-14         	      10	   2737742 ns/op	   2914333 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1-14   	      10	 328612650 ns/op	 390337583 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1k-14  	      10	 281030583 ns/op	 353416042 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_100k-14         	      10	 288135971 ns/op	 418239917 max-ns/gc
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGCPauseWithSpinningGuests/no_guests-14         	      10	   2701658 ns/op	   2793833 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1-14   	      10	 295636533 ns/op	 355497958 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1k-14  	      10	 262314233 ns/op	 363598041 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_100k-14         	      10	 287994029 ns/op	 342748833 max-ns/gc
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGCPauseWithSpinningGuests/no_guests-14         	      10	   2733696 ns/op	   2993583 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1-14   	      10	 247702392 ns/op	 411062667 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1k-14  	      10	 302629329 ns/op	 366098709 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_100k-14         	      10	 316306292 ns/op	 543734750 max-ns/gc
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGCPauseWithSpinningGuests/no_guests-14         	      10	   2701125 ns/op	   2876083 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1-14   	      10	 281743800 ns/op	 358461958 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1k-14  	      10	 273233421 ns/op	 398761750 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_100k-14         	      10	 282154238 ns/op	 405204459 max-ns/gc
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGCPauseWithSpinningGuests/no_guests-14         	      10	   2975262 ns/op	   3063250 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1-14   	      10	 449036721 ns/op	 973925875 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1k-14  	      10	 345097338 ns/op	 460106250 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_100k-14         	      10	 338873179 ns/op	 473407208 max-ns/gc
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGCPauseWithSpinningGuests/no_guests-14         	      10	   3265354 ns/op	   3574458 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1-14   	      10	 382279325 ns/op	 509479709 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_1k-14  	      10	 331235379 ns/op	 431026250 max-ns/gc
+BenchmarkGCPauseWithSpinningGuests/spinning/body_100k-14         	      10	 306071117 ns/op	 407936959 max-ns/gc
+PASS

@@ -263,7 +263,8 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 
 	if workers := experimental.GetCompilationWorkers(ctx); workers <= 1 {
 		// Compile with a single goroutine.
-		fe := frontend.NewFrontendCompiler(module, ssaBuilder, &cm.offsets, ensureTermination, withListener, needSourceInfo)
+		fe := frontend.NewFrontendCompiler(module, ssaBuilder, &cm.offsets, ensureTermination, withListener, needSourceInfo).
+			WithInterruptCheckInterval(interruptCheckIntervalOf(ctx))
 
 		for i := range module.CodeSection {
 			if wazevoapi.DeterministicCompilationVerifierEnabled {
@@ -318,6 +319,7 @@ func (e *engine) compileModule(ctx context.Context, module *wasm.Module, listene
 				be := backend.NewCompiler(ctx, machine, ssaBuilder)
 				fe := frontend.NewFrontendCompiler(
 					module, ssaBuilder, &cm.offsets, ensureTermination, withListener, needSourceInfo).
+					WithInterruptCheckInterval(interruptCheckIntervalOf(ctx)).
 					WithTryTableMetadata(sharedTTM)
 
 				for {

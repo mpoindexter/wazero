@@ -1,0 +1,222 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_5_per_exec         	   76498	      7933 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_100_per_exec       	    3828	    152700 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_10000_per_exec     	      39	  15432213 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_5                 	16457161	        36.03 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_10                	 3719371	       167.1 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_20                	   33195	     17661 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_30                	     272	   2174700 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_50         	   63302	      9282 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_100        	   20272	     28795 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_1000       	     288	   2078202 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_500              	  298960	      2014 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_1000             	  132027	      4538 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_10000            	    8394	     75880 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_5               	   90166	      9722 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_10              	   52437	     13064 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_20              	    9361	     53695 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_5_per_exec                      	   39613	     15202 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_100_per_exec                    	    2216	    280141 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_10000_per_exec                  	      20	  28116554 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_5                              	 1210587	       467.9 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_10                             	 1000000	       672.8 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_20                             	   19688	     30157 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_30                             	     163	   3526897 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_50            	   57451	     10427 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_100           	   18928	     31660 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_1000          	     250	   2398890 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_500                 	  209414	      2840 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_1000                	  108331	      5480 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_10000               	    6876	     92508 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_5                  	  100276	      7658 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_10                 	   42199	     13888 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_20                 	    9588	     59715 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_5_per_exec         	   75451	      7840 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_100_per_exec       	    3794	    153909 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_10000_per_exec     	      38	  15508030 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_5                 	16401190	        36.50 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_10                	 3649519	       169.2 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_20                	   31384	     18876 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_30                	     262	   2264003 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_50         	   63186	      9549 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_100        	   20814	     29078 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_1000       	     284	   2095002 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_500              	  296476	      2019 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_1000             	  132564	      4553 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_10000            	    6979	     90907 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_5               	  120111	      5277 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_10              	   48530	     25795 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_20              	   10000	     55686 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_5_per_exec                      	   34801	     15599 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_100_per_exec                    	    2169	    280162 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_10000_per_exec                  	      21	  28589675 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_5                              	 1251812	       473.8 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_10                             	 1000000	       652.9 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_20                             	   23119	     25760 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_30                             	     189	   3137063 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_50            	   58508	     10216 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_100           	   18844	     31443 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_1000          	     247	   2392240 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_500                 	  206649	      2748 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_1000                	  108478	      5455 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_10000               	    5665	    111470 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_5                  	   98166	      6896 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_10                 	   47356	     12949 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_20                 	   10000	     59122 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_5_per_exec         	   74917	      8027 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_100_per_exec       	    3904	    155874 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_10000_per_exec     	      38	  15669442 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_5                 	16318333	        36.53 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_10                	 3681904	       168.5 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_20                	   33798	     18768 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_30                	     259	   2187647 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_50         	   64617	      9427 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_100        	   20931	     28846 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_1000       	     289	   2088152 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_500              	  297842	      2020 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_1000             	  141757	      4240 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_10000            	    6768	     92445 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_5               	  135098	      6802 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_10              	   47254	     12338 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_20              	    9562	     54483 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_5_per_exec                      	   39188	     14700 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_100_per_exec                    	    2238	    286865 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_10000_per_exec                  	      21	  28807758 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_5                              	 1212514	       471.9 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_10                             	 1000000	       631.6 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_20                             	   19784	     28390 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_30                             	     175	   3466046 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_50            	   58503	     10205 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_100           	   18764	     31722 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_1000          	     249	   2405352 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_500                 	  209923	      2857 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_1000                	  102200	      5574 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_10000               	    5728	    109754 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_5                  	  100797	      6172 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_10                 	   42100	     13716 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_20                 	    9531	     60831 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_5_per_exec         	   71574	      7799 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_100_per_exec       	    3882	    161111 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_10000_per_exec     	      38	  15329410 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_5                 	16353693	        36.23 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_10                	 3709152	       166.9 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_20                	   34112	     17897 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_30                	     276	   2200645 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_50         	   62980	      9602 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_100        	   20614	     29106 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_1000       	     285	   2098756 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_500              	  296917	      2006 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_1000             	  132541	      4523 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_10000            	    8288	     75455 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_5               	  125796	      5772 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_10              	   50497	     12605 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_20              	   10000	     54721 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_5_per_exec                      	   39315	     14834 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_100_per_exec                    	    2223	    281930 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_10000_per_exec                  	      21	  28191520 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_5                              	 1000000	       517.8 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_10                             	 1000000	       645.4 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_20                             	   21153	     27491 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_30                             	     187	   3371151 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_50            	   57073	     10289 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_100           	   18726	     31909 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_1000          	     246	   2384726 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_500                 	  209942	      2867 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_1000                	  106862	      5470 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_10000               	    5662	    110637 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_5                  	   78976	      8161 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_10                 	   40023	     15477 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_20                 	   10000	     59980 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_5_per_exec         	   77272	      7937 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_100_per_exec       	    3994	    153023 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_10000_per_exec     	      39	  15154262 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_5                 	16510371	        36.81 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_10                	 3482160	       165.1 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_20                	   31963	     17813 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_30                	     273	   2173941 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_50         	   63932	      9289 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_100        	   20864	     28897 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_1000       	     282	   2078523 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_500              	  298722	      2021 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_1000             	  139924	      4238 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_10000            	    6849	     93022 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_5               	  115099	      5408 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_10              	   47056	     13130 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_20              	   10000	     55161 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_5_per_exec                      	   38883	     14605 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_100_per_exec                    	    2109	    283054 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_10000_per_exec                  	      21	  28515314 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_5                              	 1261987	       468.7 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_10                             	 1000000	       650.9 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_20                             	   22888	     27200 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_30                             	     177	   3269939 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_50            	   58606	     10174 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_100           	   18820	     31961 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_1000          	     250	   2386704 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_500                 	  211254	      2829 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_1000                	  101389	      5914 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_10000               	    6876	     92785 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_5                  	   98832	      7668 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_10                 	   41906	     13189 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_20                 	   10000	     58709 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_5_per_exec         	   76682	      7858 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_100_per_exec       	    3818	    159328 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/base64_10000_per_exec     	      39	  15441527 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_5                 	16253242	        36.62 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_10                	 3683779	       164.2 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_20                	   32481	     18164 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/fib_for_30                	     273	   2261239 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_50         	   64404	      9367 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_100        	   20928	     29050 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/string_manipulation_size_1000       	     284	   2090501 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_500              	  297982	      2011 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_1000             	  141553	      4252 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/reverse_array_size_10000            	    6942	     90578 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_5               	  119214	      6371 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_10              	   47016	     12793 ns/op
+BenchmarkInvocation/compiler/without_close_on_ctx_done/random_mat_mul_size_20              	   10000	     55046 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_5_per_exec                      	   39807	     15046 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_100_per_exec                    	    2199	    284045 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/base64_10000_per_exec                  	      20	  28733983 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_5                              	 1000000	       501.4 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_10                             	 1000000	       665.9 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_20                             	   21410	     27004 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/fib_for_30                             	     172	   3385123 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_50            	   57498	     10377 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_100           	   18871	     31889 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/string_manipulation_size_1000          	     249	   2426431 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_500                 	  212077	      2818 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_1000                	  108276	      5470 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/reverse_array_size_10000               	    5626	    110799 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_5                  	   99540	     13585 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_10                 	   10000	     51657 ns/op
+BenchmarkInvocation/compiler/with_close_on_ctx_done/random_mat_mul_size_20                 	    3484	    165039 ns/op
+PASS

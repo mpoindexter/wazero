@@ -1,0 +1,78 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/short_1k-14         	 1240318	       474.9 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/short_1k-14           	  860199	       739.0 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/long_10M-14         	     133	   4458732 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/long_10M-14           	      85	   7141558 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/short_1k-14            	  521776	      1152 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/short_1k-14              	  413889	      1469 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/long_10M-14            	      85	   7314208 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/long_10M-14              	      63	   9905943 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/short_1k-14         	 1270198	       471.9 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/short_1k-14           	  816294	       754.5 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/long_10M-14         	     132	   4455088 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/long_10M-14           	      84	   7306605 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/short_1k-14            	  532329	      1161 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/short_1k-14              	  410659	      1427 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/long_10M-14            	      81	   7487937 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/long_10M-14              	      61	  10074604 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/short_1k-14         	 1271110	       472.4 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/short_1k-14           	  846465	       759.5 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/long_10M-14         	     134	   4452102 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/long_10M-14           	      84	   7360009 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/short_1k-14            	  528843	      1137 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/short_1k-14              	  418026	      1416 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/long_10M-14            	      82	   7509154 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/long_10M-14              	      58	  10045851 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/short_1k-14         	 1238246	       475.6 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/short_1k-14           	  842182	       759.3 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/long_10M-14         	     134	   4437220 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/long_10M-14           	      85	   7289915 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/short_1k-14            	  531933	      1153 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/short_1k-14              	  416983	      1427 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/long_10M-14            	      81	   7494006 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/long_10M-14              	      58	  10068241 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/short_1k-14         	 1263122	       472.4 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/short_1k-14           	  829134	       755.3 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/long_10M-14         	     130	   4468961 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/long_10M-14           	      85	   7284366 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/short_1k-14            	  528315	      1088 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/short_1k-14              	  427662	      1368 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/long_10M-14            	      79	   7507423 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/long_10M-14              	      61	  10019827 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/short_1k-14         	 1264555	       472.4 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/short_1k-14           	  851954	       754.2 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/tight/long_10M-14         	     133	   4445213 ns/op
+BenchmarkContextDoneOverhead/without_close_on_ctx_done/mem/long_10M-14           	      87	   7280551 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/short_1k-14            	  556152	      1090 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/short_1k-14              	  440966	      1385 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/tight/long_10M-14            	      81	   7458852 ns/op
+BenchmarkContextDoneOverhead/with_close_on_ctx_done/mem/long_10M-14              	      61	  10015337 ns/op
+PASS

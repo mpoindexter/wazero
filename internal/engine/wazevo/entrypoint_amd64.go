@@ -2,12 +2,15 @@ package wazevo
 
 import _ "unsafe"
 
-// entrypoint is implemented by the backend.
+// entrypointAsm is implemented by the backend. It is reached through
+// callEngine.enterGuest, which selects whether to bracket it with
+// entersyscall/exitsyscall; see guestEntrypoints.
 //
-//go:linkname entrypoint github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/amd64.entrypoint
-func entrypoint(preambleExecutable, functionExecutable *byte, executionContextPtr uintptr, moduleContextPtr *byte, paramResultStackPtr *uint64, goAllocatedStackSlicePtr uintptr)
+//go:linkname entrypointAsm github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/amd64.entrypoint
+func entrypointAsm(preambleExecutable, functionExecutable *byte, executionContextPtr uintptr, moduleContextPtr *byte, paramResultStackPtr *uint64, goAllocatedStackSlicePtr uintptr)
 
-// entrypoint is implemented by the backend.
+// afterGoFunctionCallEntrypointAsm is implemented by the backend. Reached through
+// callEngine.afterGoCall.
 //
-//go:linkname afterGoFunctionCallEntrypoint github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/amd64.afterGoFunctionCallEntrypoint
-func afterGoFunctionCallEntrypoint(executable *byte, executionContextPtr uintptr, stackPointer, framePointer uintptr)
+//go:linkname afterGoFunctionCallEntrypointAsm github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/amd64.afterGoFunctionCallEntrypoint
+func afterGoFunctionCallEntrypointAsm(executable *byte, executionContextPtr uintptr, stackPointer, framePointer uintptr)

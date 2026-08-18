@@ -1,0 +1,42 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkMixedWorkload/without_close_on_ctx_done-14         	    2000	     65521 ns/op	   5457667 max-ns/req	   3568333 p50-ns/req	   4820708 p99-ns/req	         0 timeouts
+BenchmarkMixedWorkload/with_close_on_ctx_done-14            	    2000	     66964 ns/op	   5357166 max-ns/req	   3666334 p50-ns/req	   4798625 p99-ns/req	         0 timeouts
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkMixedWorkload/without_close_on_ctx_done-14         	    2000	     65810 ns/op	   5325250 max-ns/req	   3566209 p50-ns/req	   4848375 p99-ns/req	         0 timeouts
+BenchmarkMixedWorkload/with_close_on_ctx_done-14            	    2000	     66140 ns/op	   5375125 max-ns/req	   3629334 p50-ns/req	   4519667 p99-ns/req	         0 timeouts
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkMixedWorkload/without_close_on_ctx_done-14         	    2000	     65933 ns/op	   5167792 max-ns/req	   3607083 p50-ns/req	   4803750 p99-ns/req	         0 timeouts
+BenchmarkMixedWorkload/with_close_on_ctx_done-14            	    2000	     67558 ns/op	   5681750 max-ns/req	   3718625 p50-ns/req	   4827041 p99-ns/req	         0 timeouts
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkMixedWorkload/without_close_on_ctx_done-14         	    2000	     66362 ns/op	   5726042 max-ns/req	   3599791 p50-ns/req	   4984000 p99-ns/req	         0 timeouts
+BenchmarkMixedWorkload/with_close_on_ctx_done-14            	    2000	     67009 ns/op	   6056833 max-ns/req	   3654958 p50-ns/req	   5113917 p99-ns/req	         0 timeouts
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkMixedWorkload/without_close_on_ctx_done-14         	    2000	     66153 ns/op	   5483917 max-ns/req	   3556166 p50-ns/req	   4979375 p99-ns/req	         0 timeouts
+BenchmarkMixedWorkload/with_close_on_ctx_done-14            	    2000	     67752 ns/op	   5605042 max-ns/req	   3722125 p50-ns/req	   4931833 p99-ns/req	         0 timeouts
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkMixedWorkload/without_close_on_ctx_done-14         	    2000	     66673 ns/op	   5316833 max-ns/req	   3623166 p50-ns/req	   4957208 p99-ns/req	         0 timeouts
+BenchmarkMixedWorkload/with_close_on_ctx_done-14            	    2000	     66243 ns/op	   5655584 max-ns/req	   3623792 p50-ns/req	   4776625 p99-ns/req	         0 timeouts
+PASS

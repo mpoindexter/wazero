@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	_ "embed"
+	"flag"
 	"fmt"
 	"runtime"
 	"testing"
@@ -24,31 +25,58 @@ var testCtx = context.WithValue(context.Background(), arbitrary{}, "arbitrary")
 //go:embed testdata/case.wasm
 var caseWasm []byte
 
+// skipInterpreter omits the interpreter variants of the benchmarks below. They are much slower
+// than the compiler ones and are unaffected by anything under investigation on this branch, so
+// running them only lengthens a sweep.
+var skipInterpreter = flag.Bool("skip-interpreter", false,
+	"skip the interpreter variants of benchmarks in this package")
+
 func BenchmarkInvocation(b *testing.B) {
-	b.Run("interpreter", func(b *testing.B) {
-		m := instantiateHostFunctionModuleWithEngine(b, wazero.NewRuntimeConfigInterpreter())
-		defer m.Close(testCtx)
-		runAllInvocationBenches(b, m)
-	})
-	if runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64" {
-		b.Run("compiler", func(b *testing.B) {
-			m := instantiateHostFunctionModuleWithEngine(b, wazero.NewRuntimeConfigCompiler())
+	if !*skipInterpreter {
+		b.Run("interpreter", func(b *testing.B) {
+			m := instantiateHostFunctionModuleWithEngine(b, wazero.NewRuntimeConfigInterpreter())
 			defer m.Close(testCtx)
 			runAllInvocationBenches(b, m)
 		})
 	}
+	if runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64" {
+		b.Run("compiler", func(b *testing.B) {
+			// Both settings of WithCloseOnContextDone: the guest here has real loops, so with it
+			// on the interrupt check is compiled into them and this measures what that costs on
+			// something less synthetic than BenchmarkContextDoneOverhead.
+			for _, ensure := range []bool{false, true} {
+				label := "without_close_on_ctx_done"
+				if ensure {
+					label = "with_close_on_ctx_done"
+				}
+				b.Run(label, func(b *testing.B) {
+					m := instantiateHostFunctionModuleWithEngine(b,
+						wazero.NewRuntimeConfigCompiler().WithCloseOnContextDone(ensure))
+					defer m.Close(benchCtx())
+					runAllInvocationBenches(b, m)
+				})
+			}
+		})
+	}
 }
 
-func BenchmarkInitialization(b *testing.B) {
-	b.Run("interpreter", func(b *testing.B) {
-		r := createRuntime(b, wazero.NewRuntimeConfigInterpreter())
-		runInitializationBench(b, r)
-	})
+// benchCtx is testCtx carrying whatever approach-specific configuration the build wants -- for
+// approach B, the interrupt check interval. Compilation reads it, so it must be the context passed
+// to Instantiate, not just to Call.
+func benchCtx() context.Context { return benchmarkCtx(testCtx) }
 
-	b.Run("interpreter-multiple", func(b *testing.B) {
-		r := createRuntime(b, wazero.NewRuntimeConfigInterpreter())
-		runInitializationConcurrentBench(b, r)
-	})
+func BenchmarkInitialization(b *testing.B) {
+	if !*skipInterpreter {
+		b.Run("interpreter", func(b *testing.B) {
+			r := createRuntime(b, wazero.NewRuntimeConfigInterpreter())
+			runInitializationBench(b, r)
+		})
+
+		b.Run("interpreter-multiple", func(b *testing.B) {
+			r := createRuntime(b, wazero.NewRuntimeConfigInterpreter())
+			runInitializationConcurrentBench(b, r)
+		})
+	}
 
 	if platform.CompilerSupported() {
 		b.Run("compiler", func(b *testing.B) {
@@ -87,13 +115,15 @@ func BenchmarkCompilation(b *testing.B) {
 			runCompilation(b, r)
 		}
 	})
-	b.Run("interpreter", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			r := wazero.NewRuntimeWithConfig(context.Background(), wazero.NewRuntimeConfigInterpreter())
-			runCompilation(b, r)
-		}
-	})
+	if !*skipInterpreter {
+		b.Run("interpreter", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				r := wazero.NewRuntimeWithConfig(context.Background(), wazero.NewRuntimeConfigInterpreter())
+				runCompilation(b, r)
+			}
+		})
+	}
 }
 
 func runCompilation(b *testing.B, r wazero.Runtime) wazero.CompiledModule {
@@ -238,7 +268,7 @@ func instantiateHostFunctionModuleWithEngine(b *testing.B, config wazero.Runtime
 	r := createRuntime(b, config)
 
 	// Instantiate runs the "_start" function which is what TinyGo compiles "main" to.
-	m, err := r.Instantiate(testCtx, caseWasm)
+	m, err := r.Instantiate(benchCtx(), caseWasm)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -260,7 +290,7 @@ func createRuntime(b *testing.B, config wazero.RuntimeConfig) wazero.Runtime {
 		m.Memory().Write(offset, b)
 	}
 
-	r := wazero.NewRuntimeWithConfig(testCtx, config)
+	r := wazero.NewRuntimeWithConfig(benchCtx(), config)
 
 	_, err := r.NewHostModuleBuilder("env").
 		NewFunctionBuilder().WithFunc(getRandomString).Export("get_random_string").

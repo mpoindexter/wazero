@@ -206,6 +206,7 @@ func (m *moduleEngine) NewFunction(index wasm.Index) api.Function {
 		requiredParams:         typ.ParamNumInUint64,
 		numberOfResults:        typ.ResultNumInUint64,
 	}
+	ce.enterGuest, ce.afterGoCall = guestEntrypoints(p.ensureTermination)
 
 	sharedFunctions := p.sharedFunctions
 	ce.execCtx.memoryGrowTrampolineAddress = sharedFunctions.memoryGrowAddress
@@ -221,6 +222,7 @@ func (m *moduleEngine) NewFunction(index wasm.Index) api.Function {
 	ce.execCtx.tryTableEnterTrampolineAddress = sharedFunctions.tryTableEnterAddress
 	ce.execCtx.tryTableLeaveTrampolineAddress = sharedFunctions.tryTableLeaveAddress
 	ce.execCtx.memmoveAddress = memmovPtr
+	ce.execCtx.moduleClosedPtr = (*uint64)(unsafe.Pointer(&m.module.Closed))
 	ce.init()
 	return ce
 }

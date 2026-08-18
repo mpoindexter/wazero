@@ -252,32 +252,9 @@ blk1: () <-- (blk0,blk1)
 		{
 			name: "loop - br / ensure termination", m: testcases.LoopBr.Module,
 			ensureTermination: true,
-			exp: `
-signatures:
-	sig2: i64_v
-
-blk0: (exec_ctx:i64, module_ctx:i64)
-	Jump blk1
-
-blk1: () <-- (blk0,blk1)
-	v2:i64 = Load exec_ctx, 0x58
-	CallIndirect v2:sig2, exec_ctx
-	Jump blk1
-
-blk2: ()
-`,
-			expAfterPasses: `
-signatures:
-	sig2: i64_v
-
-blk0: (exec_ctx:i64, module_ctx:i64)
-	Jump fallthrough
-
-blk1: () <-- (blk0,blk1)
-	v2:i64 = Load exec_ctx, 0x58
-	CallIndirect v2:sig2, exec_ctx
-	Jump blk1
-`,
+			// Approach-dependent; see interrupt_approach_{a,d}_test.go.
+			exp:            loopBrEnsureTerminationExp,
+			expAfterPasses: loopBrEnsureTerminationExpAfterPasses,
 		},
 		{
 			name: "loop - br_if", m: testcases.LoopBrIf.Module,

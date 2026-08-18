@@ -1,0 +1,102 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInterruptLatency/alone/body_1-14         	      30	  20942581 ns/op	   1037959 max-ns/interrupt	    923454 ns/interrupt
+BenchmarkInterruptLatency/alone/body_1k-14        	      30	  21013640 ns/op	   1032209 max-ns/interrupt	    976987 ns/interrupt
+BenchmarkInterruptLatency/alone/body_10k-14       	      30	  21040218 ns/op	   1021709 max-ns/interrupt	    948544 ns/interrupt
+BenchmarkInterruptLatency/alone/body_100k-14      	      30	  21699228 ns/op	   1042250 max-ns/interrupt	    909410 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1-14     	      30	  35553703 ns/op	  81218875 max-ns/interrupt	  15322807 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1k-14    	      30	  34099594 ns/op	  33838833 max-ns/interrupt	  13867304 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_10k-14   	      30	  30701456 ns/op	  30622833 max-ns/interrupt	  10382900 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_100k-14  	      30	  38989735 ns/op	  32698875 max-ns/interrupt	  17887688 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1-14     	      30	  33664808 ns/op	  74661458 max-ns/interrupt	  13507139 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1k-14    	      30	  31151149 ns/op	  32939125 max-ns/interrupt	  10985297 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_10k-14   	      30	  28688583 ns/op	  34554458 max-ns/interrupt	   8468943 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_100k-14  	      30	  38994699 ns/op	  41762417 max-ns/interrupt	  18045668 ns/interrupt
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInterruptLatency/alone/body_1-14         	      30	  20970133 ns/op	   1029750 max-ns/interrupt	    945642 ns/interrupt
+BenchmarkInterruptLatency/alone/body_1k-14        	      30	  21243461 ns/op	   8446250 max-ns/interrupt	   1174032 ns/interrupt
+BenchmarkInterruptLatency/alone/body_10k-14       	      30	  21045549 ns/op	   1063833 max-ns/interrupt	    903533 ns/interrupt
+BenchmarkInterruptLatency/alone/body_100k-14      	      30	  21721874 ns/op	   1050834 max-ns/interrupt	    924120 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1-14     	      30	  41597836 ns/op	  69520375 max-ns/interrupt	  21360426 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1k-14    	      30	  44323782 ns/op	  97169750 max-ns/interrupt	  24079064 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_10k-14   	      30	  36425650 ns/op	  44092458 max-ns/interrupt	  16113046 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_100k-14  	      30	  35417796 ns/op	  49238792 max-ns/interrupt	  14422371 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1-14     	      30	  37116767 ns/op	  34140375 max-ns/interrupt	  16958964 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1k-14    	      30	  34317150 ns/op	  42419709 max-ns/interrupt	  14152038 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_10k-14   	      30	  33282628 ns/op	  45326625 max-ns/interrupt	  13046497 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_100k-14  	      30	  35228853 ns/op	  47172667 max-ns/interrupt	  14239428 ns/interrupt
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInterruptLatency/alone/body_1-14         	      30	  20872199 ns/op	   1024834 max-ns/interrupt	    856047 ns/interrupt
+BenchmarkInterruptLatency/alone/body_1k-14        	      30	  20973053 ns/op	   1097083 max-ns/interrupt	    946822 ns/interrupt
+BenchmarkInterruptLatency/alone/body_10k-14       	      30	  21054321 ns/op	   1051500 max-ns/interrupt	    959928 ns/interrupt
+BenchmarkInterruptLatency/alone/body_100k-14      	      30	  21724988 ns/op	   1048625 max-ns/interrupt	    954801 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1-14     	      30	  39059199 ns/op	  42346916 max-ns/interrupt	  18817020 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1k-14    	      30	  35652232 ns/op	  92484666 max-ns/interrupt	  15397796 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_10k-14   	      30	  35560569 ns/op	  41962917 max-ns/interrupt	  15246796 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_100k-14  	      30	  38137700 ns/op	  43233208 max-ns/interrupt	  17115767 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1-14     	      30	  35869099 ns/op	  39442125 max-ns/interrupt	  15715481 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1k-14    	      30	  33027614 ns/op	  44252708 max-ns/interrupt	  12855622 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_10k-14   	      30	  33560821 ns/op	  64930875 max-ns/interrupt	  13312367 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_100k-14  	      30	  37715232 ns/op	  65311833 max-ns/interrupt	  16766856 ns/interrupt
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInterruptLatency/alone/body_1-14         	      30	  20977431 ns/op	   1025958 max-ns/interrupt	    960724 ns/interrupt
+BenchmarkInterruptLatency/alone/body_1k-14        	      30	  20930899 ns/op	   1029875 max-ns/interrupt	    907140 ns/interrupt
+BenchmarkInterruptLatency/alone/body_10k-14       	      30	  21053286 ns/op	   1090625 max-ns/interrupt	    948326 ns/interrupt
+BenchmarkInterruptLatency/alone/body_100k-14      	      30	  21807389 ns/op	   1041750 max-ns/interrupt	    982217 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1-14     	      30	  34094189 ns/op	  31308542 max-ns/interrupt	  13847188 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1k-14    	      30	  40585674 ns/op	  70719833 max-ns/interrupt	  20332867 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_10k-14   	      30	  37505257 ns/op	  67960000 max-ns/interrupt	  17181508 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_100k-14  	      30	  40956614 ns/op	  80251042 max-ns/interrupt	  19934757 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1-14     	      30	  31511514 ns/op	  35960875 max-ns/interrupt	  11365678 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1k-14    	      30	  30924878 ns/op	  73236833 max-ns/interrupt	  10763765 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_10k-14   	      30	  29841118 ns/op	  32088792 max-ns/interrupt	   9599183 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_100k-14  	      30	  33093357 ns/op	  41446833 max-ns/interrupt	  12054854 ns/interrupt
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInterruptLatency/alone/body_1-14         	      30	  20988312 ns/op	   1022125 max-ns/interrupt	    971790 ns/interrupt
+BenchmarkInterruptLatency/alone/body_1k-14        	      30	  21001111 ns/op	   1017458 max-ns/interrupt	    977756 ns/interrupt
+BenchmarkInterruptLatency/alone/body_10k-14       	      30	  21088633 ns/op	   1037708 max-ns/interrupt	    995821 ns/interrupt
+BenchmarkInterruptLatency/alone/body_100k-14      	      30	  21865853 ns/op	   1122375 max-ns/interrupt	    999588 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1-14     	      30	  31737696 ns/op	  40075708 max-ns/interrupt	  11505279 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1k-14    	      30	  38522944 ns/op	  63364583 max-ns/interrupt	  18279300 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_10k-14   	      30	  38862776 ns/op	  73770833 max-ns/interrupt	  18541264 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_100k-14  	      30	  40670351 ns/op	  76915333 max-ns/interrupt	  19643447 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1-14     	      30	  36944168 ns/op	  41027584 max-ns/interrupt	  16788374 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1k-14    	      30	  34978133 ns/op	  43584125 max-ns/interrupt	  14803700 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_10k-14   	      30	  36486349 ns/op	  65353750 max-ns/interrupt	  16245608 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_100k-14  	      30	  38817243 ns/op	  52805208 max-ns/interrupt	  17848654 ns/interrupt
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkInterruptLatency/alone/body_1-14         	      30	  21851986 ns/op	   2033333 max-ns/interrupt	   1834455 ns/interrupt
+BenchmarkInterruptLatency/alone/body_1k-14        	      30	  21924307 ns/op	   2025333 max-ns/interrupt	   1903138 ns/interrupt
+BenchmarkInterruptLatency/alone/body_10k-14       	      30	  21861867 ns/op	   2016666 max-ns/interrupt	   1766439 ns/interrupt
+BenchmarkInterruptLatency/alone/body_100k-14      	      30	  22785321 ns/op	   2055958 max-ns/interrupt	   1929648 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1-14     	      30	  40650151 ns/op	  82190125 max-ns/interrupt	  20420978 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_1k-14    	      30	  42546886 ns/op	  80871459 max-ns/interrupt	  22303235 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_10k-14   	      30	  40892172 ns/op	  81324375 max-ns/interrupt	  20580179 ns/interrupt
+BenchmarkInterruptLatency/one_of_15/body_100k-14  	      30	  46157039 ns/op	  84876667 max-ns/interrupt	  25099922 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1-14     	      30	  41953040 ns/op	  45775583 max-ns/interrupt	  21803274 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_1k-14    	      30	  41709690 ns/op	  42460166 max-ns/interrupt	  21542413 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_10k-14   	      30	  39381742 ns/op	  41899750 max-ns/interrupt	  19120832 ns/interrupt
+BenchmarkInterruptLatency/all_of_15/body_100k-14  	      30	  35167753 ns/op	  31603292 max-ns/interrupt	  14193240 ns/interrupt
+PASS

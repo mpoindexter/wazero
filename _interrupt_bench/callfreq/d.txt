@@ -1,0 +1,90 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGuestCallFrequency/calls_1/off-14         	    1000	     22467 ns/op
+BenchmarkGuestCallFrequency/calls_1/on-14          	    1000	     23270 ns/op
+BenchmarkGuestCallFrequency/calls_2/off-14         	    1000	     21737 ns/op
+BenchmarkGuestCallFrequency/calls_2/on-14          	    1000	     23320 ns/op
+BenchmarkGuestCallFrequency/calls_8/off-14         	    1000	     21244 ns/op
+BenchmarkGuestCallFrequency/calls_8/on-14          	    1000	     24176 ns/op
+BenchmarkGuestCallFrequency/calls_32/off-14        	    1000	     21577 ns/op
+BenchmarkGuestCallFrequency/calls_32/on-14         	    1000	     31099 ns/op
+BenchmarkGuestCallFrequency/calls_128/off-14       	    1000	     23152 ns/op
+BenchmarkGuestCallFrequency/calls_128/on-14        	    1000	     62419 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGuestCallFrequency/calls_1/off-14         	    1000	     21931 ns/op
+BenchmarkGuestCallFrequency/calls_1/on-14          	    1000	     23191 ns/op
+BenchmarkGuestCallFrequency/calls_2/off-14         	    1000	     21768 ns/op
+BenchmarkGuestCallFrequency/calls_2/on-14          	    1000	     23306 ns/op
+BenchmarkGuestCallFrequency/calls_8/off-14         	    1000	     21666 ns/op
+BenchmarkGuestCallFrequency/calls_8/on-14          	    1000	     23824 ns/op
+BenchmarkGuestCallFrequency/calls_32/off-14        	    1000	     22426 ns/op
+BenchmarkGuestCallFrequency/calls_32/on-14         	    1000	     30848 ns/op
+BenchmarkGuestCallFrequency/calls_128/off-14       	    1000	     23994 ns/op
+BenchmarkGuestCallFrequency/calls_128/on-14        	    1000	     52786 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGuestCallFrequency/calls_1/off-14         	    1000	     22568 ns/op
+BenchmarkGuestCallFrequency/calls_1/on-14          	    1000	     23684 ns/op
+BenchmarkGuestCallFrequency/calls_2/off-14         	    1000	     23456 ns/op
+BenchmarkGuestCallFrequency/calls_2/on-14          	    1000	     24608 ns/op
+BenchmarkGuestCallFrequency/calls_8/off-14         	    1000	     21637 ns/op
+BenchmarkGuestCallFrequency/calls_8/on-14          	    1000	     24842 ns/op
+BenchmarkGuestCallFrequency/calls_32/off-14        	    1000	     21898 ns/op
+BenchmarkGuestCallFrequency/calls_32/on-14         	    1000	     30785 ns/op
+BenchmarkGuestCallFrequency/calls_128/off-14       	    1000	     24131 ns/op
+BenchmarkGuestCallFrequency/calls_128/on-14        	    1000	     54492 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGuestCallFrequency/calls_1/off-14         	    1000	     23090 ns/op
+BenchmarkGuestCallFrequency/calls_1/on-14          	    1000	     23335 ns/op
+BenchmarkGuestCallFrequency/calls_2/off-14         	    1000	     22125 ns/op
+BenchmarkGuestCallFrequency/calls_2/on-14          	    1000	     23363 ns/op
+BenchmarkGuestCallFrequency/calls_8/off-14         	    1000	     21530 ns/op
+BenchmarkGuestCallFrequency/calls_8/on-14          	    1000	     24362 ns/op
+BenchmarkGuestCallFrequency/calls_32/off-14        	    1000	     21661 ns/op
+BenchmarkGuestCallFrequency/calls_32/on-14         	    1000	     30270 ns/op
+BenchmarkGuestCallFrequency/calls_128/off-14       	    1000	     23959 ns/op
+BenchmarkGuestCallFrequency/calls_128/on-14        	    1000	     56304 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGuestCallFrequency/calls_1/off-14         	    1000	     25269 ns/op
+BenchmarkGuestCallFrequency/calls_1/on-14          	    1000	     23938 ns/op
+BenchmarkGuestCallFrequency/calls_2/off-14         	    1000	     21300 ns/op
+BenchmarkGuestCallFrequency/calls_2/on-14          	    1000	     23025 ns/op
+BenchmarkGuestCallFrequency/calls_8/off-14         	    1000	     21872 ns/op
+BenchmarkGuestCallFrequency/calls_8/on-14          	    1000	     23616 ns/op
+BenchmarkGuestCallFrequency/calls_32/off-14        	    1000	     22862 ns/op
+BenchmarkGuestCallFrequency/calls_32/on-14         	    1000	     31328 ns/op
+BenchmarkGuestCallFrequency/calls_128/off-14       	    1000	     24186 ns/op
+BenchmarkGuestCallFrequency/calls_128/on-14        	    1000	     59486 ns/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/tetratelabs/wazero/internal/integration_test/bench
+cpu: Apple M4 Pro
+BenchmarkGuestCallFrequency/calls_1/off-14         	    1000	     23718 ns/op
+BenchmarkGuestCallFrequency/calls_1/on-14          	    1000	     23251 ns/op
+BenchmarkGuestCallFrequency/calls_2/off-14         	    1000	     21504 ns/op
+BenchmarkGuestCallFrequency/calls_2/on-14          	    1000	     23195 ns/op
+BenchmarkGuestCallFrequency/calls_8/off-14         	    1000	     21885 ns/op
+BenchmarkGuestCallFrequency/calls_8/on-14          	    1000	     24589 ns/op
+BenchmarkGuestCallFrequency/calls_32/off-14        	    1000	     22027 ns/op
+BenchmarkGuestCallFrequency/calls_32/on-14         	    1000	     30984 ns/op
+BenchmarkGuestCallFrequency/calls_128/off-14       	    1000	     24673 ns/op
+BenchmarkGuestCallFrequency/calls_128/on-14        	    1000	     52985 ns/op
+PASS

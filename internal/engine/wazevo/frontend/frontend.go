@@ -31,6 +31,10 @@ type Compiler struct {
 	refFuncSig             ssa.Signature
 	memmoveSig             ssa.Signature
 	ensureTermination      bool
+	// interruptCheckInterval is the number of loop back-edges between two unconditional
+	// exits to Go code. Zero means the loop lowering picks its own value. Only the
+	// efficient_interrupt_approach_b lowering reads it; see interrupt_approach_b.go.
+	interruptCheckInterval uint64
 
 	// Followings are reset by per function.
 
@@ -168,6 +172,13 @@ func (s *SharedTryTableMetadata) Append(info wazevoapi.TryTableInfo) int {
 func (s *SharedTryTableMetadata) Table() []wazevoapi.TryTableInfo {
 	s.finalized = true
 	return s.table
+}
+
+// WithInterruptCheckInterval sets the loop interrupt check interval. Zero leaves the
+// lowering free to pick its own; see the interruptCheckInterval field.
+func (c *Compiler) WithInterruptCheckInterval(n uint64) *Compiler {
+	c.interruptCheckInterval = n
+	return c
 }
 
 // WithTryTableMetadata replaces the try_table metadata table implementation.
