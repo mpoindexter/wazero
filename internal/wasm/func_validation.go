@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -626,17 +625,23 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					} else {
 						expectedTypes = target.blockType.Results
 					}
-					var catchTypes []ValueType
-					catchTypes = append(catchTypes, tagType.Params...)
+					nCatchTypes := len(tagType.Params)
 					if catchKind == CatchKindCatchRef {
-						catchTypes = append(catchTypes, ValueTypeExnref.AsNonNullable())
+						nCatchTypes++
 					}
-					if len(catchTypes) != len(expectedTypes) {
-						return fmt.Errorf("catch clause type mismatch: catch delivers %d values but label expects %d", len(catchTypes), len(expectedTypes))
+					if nCatchTypes != len(expectedTypes) {
+						return fmt.Errorf("catch clause type mismatch: catch delivers %d values but label expects %d", nCatchTypes, len(expectedTypes))
 					}
-					for j := range catchTypes {
-						if !isRefSubtypeOf(catchTypes[j], expectedTypes[j]) {
-							return fmt.Errorf("catch clause type mismatch at index %d: %v is not a subtype of %v", j, catchTypes[j], expectedTypes[j])
+					for j := range tagType.Params {
+						if !isRefSubtypeOf(tagType.Params[j], expectedTypes[j]) {
+							return fmt.Errorf("catch clause type mismatch at index %d: %v is not a subtype of %v", j, tagType.Params[j], expectedTypes[j])
+						}
+					}
+					if catchKind == CatchKindCatchRef {
+						idx := len(expectedTypes) - 1
+						typ := ValueTypeExnref.AsNonNullable()
+						if !isRefSubtypeOf(typ, expectedTypes[idx]) {
+							return fmt.Errorf("catch clause type mismatch at index %d: %v is not a subtype of %v", idx, typ, expectedTypes[len(expectedTypes)-1])
 						}
 					}
 				case CatchKindCatchAll, CatchKindCatchAllRef:
@@ -656,17 +661,18 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					} else {
 						expectedTypes = target.blockType.Results
 					}
-					var catchTypes []ValueType
+
 					if catchKind == CatchKindCatchAllRef {
-						catchTypes = append(catchTypes, ValueTypeExnref.AsNonNullable())
-					}
-					if len(catchTypes) != len(expectedTypes) {
-						return fmt.Errorf("catch_all clause type mismatch: catch delivers %d values but label expects %d", len(catchTypes), len(expectedTypes))
-					}
-					for j := range catchTypes {
-						if !isRefSubtypeOf(catchTypes[j], expectedTypes[j]) {
-							return fmt.Errorf("catch_all clause type mismatch at index %d", j)
+						if len(expectedTypes) != 1 {
+							return fmt.Errorf("catch_all clause type mismatch: catch delivers 1 values but label expects %d", len(expectedTypes))
 						}
+
+						if !isRefSubtypeOf(ValueTypeExnref.AsNonNullable(), expectedTypes[0]) {
+							return fmt.Errorf("catch_all clause type mismatch at index %d", 0)
+						}
+
+					} else if len(expectedTypes) != 0 {
+						return fmt.Errorf("catch_all clause type mismatch: catch delivers 0 values but label expects %d", len(expectedTypes))
 					}
 				default:
 					return fmt.Errorf("invalid catch kind: %#x", catchKind)
@@ -1724,7 +1730,7 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				return fmt.Errorf("read block: %w", err)
 			}
 			controlBlockStack.push(pc, 0, 0, bt, num, 0)
-			controlBlockStack.stack[len(controlBlockStack.stack)-1].savedInitLocals = maps.Clone(sts.initLocals)
+			controlBlockStack.stack[len(controlBlockStack.stack)-1].savedInitLocals = sts.initLocals.Clone()
 			if err = valueTypeStack.popParams(op, bt.Params, false); err != nil {
 				return err
 			}
@@ -2113,7 +2119,7 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				return fmt.Errorf("read block: %w", err)
 			}
 			controlBlockStack.push(pc, 0, 0, bt, num, op)
-			controlBlockStack.stack[len(controlBlockStack.stack)-1].savedInitLocals = maps.Clone(sts.initLocals)
+			controlBlockStack.stack[len(controlBlockStack.stack)-1].savedInitLocals = sts.initLocals.Clone()
 			if err = valueTypeStack.popParams(op, bt.Params, false); err != nil {
 				return err
 			}
@@ -2130,7 +2136,7 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				return fmt.Errorf("read block: %w", err)
 			}
 			controlBlockStack.push(pc, 0, 0, bt, num, op)
-			controlBlockStack.stack[len(controlBlockStack.stack)-1].savedInitLocals = maps.Clone(sts.initLocals)
+			controlBlockStack.stack[len(controlBlockStack.stack)-1].savedInitLocals = sts.initLocals.Clone()
 			if err = valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
 				return fmt.Errorf("cannot pop the operand for 'if': %v", err)
 			}
@@ -2155,7 +2161,7 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				return err
 			}
 			// Restore init locals to the state at if-entry for the else branch.
-			sts.initLocals = maps.Clone(bl.savedInitLocals)
+			sts.initLocals = bl.savedInitLocals.Clone()
 			// Before entering instructions inside else, we pop all the values pushed by then block.
 			valueTypeStack.resetAtStackLimit()
 			// Plus we have to push any block params again.
@@ -2369,7 +2375,7 @@ type stacks struct {
 	// ls is the label slice that is reused for each br_table instruction.
 	ls []uint32
 	// initLocals tracks which non-nullable ref locals have been initialized.
-	initLocals map[uint32]struct{}
+	initLocals bitset
 }
 
 func (sts *stacks) reset(functionType *FunctionType) {
@@ -2380,10 +2386,7 @@ func (sts *stacks) reset(functionType *FunctionType) {
 	sts.cs.stack = sts.cs.stack[:0]
 	sts.cs.stack = append(sts.cs.stack, controlBlock{blockType: functionType})
 	sts.ls = sts.ls[:0]
-	clear(sts.initLocals)
-	if sts.initLocals == nil {
-		sts.initLocals = make(map[uint32]struct{})
-	}
+	sts.initLocals.Clear()
 }
 
 func (sts *stacks) validateCallSignature(opName string, funcType *FunctionType) error {
@@ -2421,7 +2424,7 @@ func (sts *stacks) requireLocalInit(index, inputLen uint32, localTypes []ValueTy
 	if index >= inputLen {
 		lt := localTypes[index-inputLen]
 		if lt.IsRef() && !lt.IsNullable() {
-			if _, ok := sts.initLocals[index]; !ok {
+			if !sts.initLocals.Test(index) {
 				return fmt.Errorf("uninitialized local %d", index)
 			}
 		}
@@ -2433,7 +2436,7 @@ func (sts *stacks) markLocalInit(index, inputLen uint32, localTypes []ValueType)
 	if index >= inputLen {
 		lt := localTypes[index-inputLen]
 		if lt.IsRef() && !lt.IsNullable() {
-			sts.initLocals[index] = struct{}{}
+			sts.initLocals.Set(index, true)
 		}
 	}
 }
@@ -2680,7 +2683,7 @@ type controlBlock struct {
 	// op is zero when the outermost block
 	op Opcode
 	// savedInitLocals is the set of initialized locals at the time this block was entered.
-	savedInitLocals map[uint32]struct{}
+	savedInitLocals bitset
 }
 
 // DecodeBlockType decodes the type index from a positive 33-bit signed integer. Negative numbers indicate up to one
@@ -2801,4 +2804,64 @@ func SplitCallStack(ft *FunctionType, stack []uint64) (params []uint64, results 
 		results = stack[:n]
 	}
 	return
+}
+
+// bitsetCacheWords is how many words a bitset holds inline before it has to spill to extraWords.
+const bitsetCacheWords = 4
+
+type bitset struct {
+	cache      [bitsetCacheWords]uint64
+	extraWords []uint64
+}
+
+func (s *bitset) Test(i uint32) bool {
+	w := int(i / 64)
+	if w < bitsetCacheWords {
+		return s.cache[w]&(1<<(i%64)) != 0
+	}
+	w -= bitsetCacheWords
+	if w >= len(s.extraWords) {
+		return false
+	}
+	return s.extraWords[w]&(1<<(i%64)) != 0
+}
+
+func (s *bitset) Set(i uint32, value bool) {
+	w := int(i / 64)
+	if w < bitsetCacheWords {
+		if value {
+			s.cache[w] |= 1 << (i % 64)
+		} else {
+			s.cache[w] &^= 1 << (i % 64)
+		}
+		return
+	}
+
+	w -= bitsetCacheWords
+	if w >= len(s.extraWords) && !value {
+		return // Bits past the end are already unset, so don't grow to clear one.
+	}
+
+	if w >= len(s.extraWords) {
+		s.extraWords = append(s.extraWords, make([]uint64, w+1-len(s.extraWords))...)
+	}
+
+	if value {
+		s.extraWords[w] |= 1 << (i % 64)
+	} else {
+		s.extraWords[w] &^= 1 << (i % 64)
+	}
+}
+
+func (s *bitset) Clear() {
+	s.cache = [bitsetCacheWords]uint64{}
+	for i := range s.extraWords {
+		s.extraWords[i] = 0
+	}
+}
+
+func (s *bitset) Clone() bitset {
+	copy := *s
+	copy.extraWords = slices.Clone(s.extraWords)
+	return copy
 }

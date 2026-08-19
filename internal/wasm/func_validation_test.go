@@ -4921,3 +4921,109 @@ func TestValidation_LegacyExceptionHandlingOpcodes(t *testing.T) {
 		})
 	}
 }
+
+func Test_bitset(t *testing.T) {
+	// Indexes spanning every inline cache word, the spill boundary and several extra words.
+	indexes := []uint32{0, 1, 63, 64, 127, 128, 191, 192, 255, 256, 257, 319, 320, 511, 1000}
+
+	set := func(s *bitset, indexes []uint32, value bool) {
+		for _, i := range indexes {
+			s.Set(i, value)
+		}
+	}
+	requireOnly := func(t *testing.T, s *bitset, indexes []uint32) {
+		t.Helper()
+		expected := map[uint32]bool{}
+		for _, i := range indexes {
+			expected[i] = true
+		}
+		for i := uint32(0); i < 1100; i++ {
+			require.Equal(t, expected[i], s.Test(i), "bit %d", i)
+		}
+	}
+
+	t.Run("zero value is empty", func(t *testing.T) {
+		var s bitset
+		requireOnly(t, &s, nil)
+	})
+
+	t.Run("set then unset", func(t *testing.T) {
+		var s bitset
+		set(&s, indexes, true)
+		requireOnly(t, &s, indexes)
+
+		set(&s, indexes, false)
+		requireOnly(t, &s, nil)
+	})
+
+	t.Run("set is idempotent", func(t *testing.T) {
+		var s bitset
+		set(&s, indexes, true)
+		set(&s, indexes, true)
+		requireOnly(t, &s, indexes)
+	})
+
+	t.Run("only the requested bit changes", func(t *testing.T) {
+		var s bitset
+		set(&s, indexes, true)
+		s.Set(256, false)
+		requireOnly(t, &s, []uint32{0, 1, 63, 64, 127, 128, 191, 192, 255, 257, 319, 320, 511, 1000})
+	})
+
+	t.Run("bits below the spill boundary need no extra words", func(t *testing.T) {
+		var s bitset
+		s.Set(255, true)
+		require.Zero(t, len(s.extraWords))
+	})
+
+	t.Run("extra words grow to fit", func(t *testing.T) {
+		var s bitset
+		s.Set(256, true)
+		require.Equal(t, 1, len(s.extraWords))
+
+		s.Set(1000, true)
+		require.Equal(t, 1000/64-bitsetCacheWords+1, len(s.extraWords))
+		require.True(t, s.Test(256))
+	})
+
+	t.Run("clearing past the end doesn't grow", func(t *testing.T) {
+		var s bitset
+		s.Set(1000, false)
+		require.Zero(t, len(s.extraWords))
+		require.False(t, s.Test(1000))
+	})
+
+	t.Run("Clear resets every bit", func(t *testing.T) {
+		var s bitset
+		set(&s, indexes, true)
+		extraWords := len(s.extraWords)
+
+		s.Clear()
+		requireOnly(t, &s, nil)
+		// The spilled words are reused rather than reallocated.
+		require.Equal(t, extraWords, len(s.extraWords))
+	})
+
+	t.Run("Clone is independent of its source", func(t *testing.T) {
+		var s bitset
+		set(&s, []uint32{5, 300}, true)
+
+		clone := s.Clone()
+		set(&clone, []uint32{6, 301}, true)
+		set(&s, []uint32{7, 302}, true)
+
+		requireOnly(t, &s, []uint32{5, 7, 300, 302})
+		requireOnly(t, &clone, []uint32{5, 6, 300, 301})
+	})
+
+	t.Run("Clone of a cleared source is independent", func(t *testing.T) {
+		var s bitset
+		set(&s, []uint32{300}, true)
+		s.Clear()
+
+		clone := s.Clone()
+		clone.Set(300, true)
+		requireOnly(t, &s, nil)
+		requireOnly(t, &clone, []uint32{300})
+	})
+}
