@@ -501,7 +501,7 @@ func (m *Module) declaredFunctionIndexes(enabledFeatures api.CoreFeatures) (ret 
 	for i := range m.GlobalSection {
 		g := &m.GlobalSection[i]
 
-		_, _, initErr := evaluateConstExpr(
+		_, initErr := evaluateConstExpr(
 			&g.Init,
 			func(globalIndex Index) (ValueType, uint64, uint64, error) {
 				vt, err := m.resolveConstExprGlobalType(enabledFeatures, SectionIDGlobal, Index(i), globalIndex)
@@ -522,7 +522,7 @@ func (m *Module) declaredFunctionIndexes(enabledFeatures api.CoreFeatures) (ret 
 	for i := range m.ElementSection {
 		elem := &m.ElementSection[i]
 		for _, initExpr := range elem.Init {
-			_, _, _ = evaluateConstExpr(
+			_, _ = evaluateConstExpr(
 				&initExpr,
 				func(globalIndex Index) (ValueType, uint64, uint64, error) {
 					vt, err := m.resolveConstExprGlobalType(enabledFeatures, SectionIDElement, Index(i), globalIndex)
@@ -650,7 +650,7 @@ func (m *Module) validateExports(enabledFeatures api.CoreFeatures, functions []I
 
 func (m *Module) validateConstExpression(globals []GlobalType, numFuncs uint32, expr *ConstantExpression, expectedType ValueType) (err error) {
 	var lastRefFuncIdx Index
-	_, typ, err := evaluateConstExpr(
+	cev, err := evaluateConstExpr(
 		expr,
 		func(globalIndex Index) (ValueType, uint64, uint64, error) {
 			if uint32(len(globals)) <= globalIndex {
@@ -672,6 +672,8 @@ func (m *Module) validateConstExpression(globals []GlobalType, numFuncs uint32, 
 	if err != nil {
 		return err
 	}
+
+	typ := cev.ValueType
 	if typ == ValueTypeFuncref {
 		if typeIndex, ok := m.typeIndexOfFunction(lastRefFuncIdx); ok {
 			typ = ValueTypeConcreteRef(typeIndex, false)

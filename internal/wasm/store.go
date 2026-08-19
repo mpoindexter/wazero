@@ -188,7 +188,7 @@ func (m *ModuleInstance) buildElementInstances(elements []ElementSegment) {
 			m.ElementInstances[i] = inst
 			for j, idx := range inits {
 				initExprResults := evaluateConstExprInModuleInstance(&idx, m)
-				inst[j] = Reference(initExprResults[0])
+				inst[j] = Reference(initExprResults.Val)
 			}
 		}
 	}
@@ -203,7 +203,7 @@ func (m *ModuleInstance) applyElements(elems []ElementSegment) {
 			continue
 		}
 		offsetExprResults := evaluateConstExprInModuleInstance(&elem.OffsetExpr, m)
-		offset := uint32(offsetExprResults[0])
+		offset := uint32(offsetExprResults.Val)
 
 		table := m.Tables[elem.TableIndex]
 		references := table.References
@@ -225,7 +225,7 @@ func (m *ModuleInstance) applyElements(elems []ElementSegment) {
 		} else {
 			for i, init := range elem.Init {
 				initExprResults := evaluateConstExprInModuleInstance(&init, m)
-				references[offset+uint32(i)] = Reference(initExprResults[0])
+				references[offset+uint32(i)] = Reference(initExprResults.Val)
 			}
 		}
 	}
@@ -237,7 +237,7 @@ func (m *ModuleInstance) validateData(data []DataSegment) (err error) {
 	for i := range data {
 		d := &data[i]
 		if !d.IsPassive() {
-			results, typ, err := evaluateConstExpr(
+			cev, err := evaluateConstExpr(
 				&d.OffsetExpression,
 				func(globalIndex Index) (ValueType, uint64, uint64, error) {
 					if globalIndex >= Index(len(m.Globals)) {
@@ -253,10 +253,10 @@ func (m *ModuleInstance) validateData(data []DataSegment) (err error) {
 			if err != nil {
 				return fmt.Errorf("%s[%d] failed to evaluate offset expression: %w", SectionIDName(SectionIDData), i, err)
 			}
-			if typ != ValueTypeI32 {
-				return fmt.Errorf("%s[%d] offset expression must return i32 but was %s", SectionIDName(SectionIDData), i, ValueTypeName(typ))
+			if cev.ValueType != ValueTypeI32 {
+				return fmt.Errorf("%s[%d] offset expression must return i32 but was %s", SectionIDName(SectionIDData), i, ValueTypeName(cev.ValueType))
 			}
-			offset := int(results[0])
+			offset := int(cev.Val)
 			ceil := offset + len(d.Init)
 			if offset < 0 || ceil > len(m.MemoryInstance.Buffer) {
 				return fmt.Errorf("%s[%d]: out of bounds memory access", SectionIDName(SectionIDData), i)
@@ -276,7 +276,7 @@ func (m *ModuleInstance) applyData(data []DataSegment) error {
 		m.DataInstances[i] = d.Init
 		if !d.IsPassive() {
 			offsetExprResults := evaluateConstExprInModuleInstance(&d.OffsetExpression, m)
-			offset := int(offsetExprResults[0])
+			offset := int(offsetExprResults.Val)
 			if offset < 0 || offset+len(d.Init) > len(m.MemoryInstance.Buffer) {
 				return fmt.Errorf("%s[%d]: out of bounds memory access", SectionIDName(SectionIDData), i)
 			}
@@ -558,7 +558,7 @@ func errorInvalidImport(i *Import, err error) error {
 // Global initialization constant expression can only reference the imported globals.
 // See the note on https://www.w3.org/TR/2019/REC-wasm-core-1-20191205/#constant-expressions%E2%91%A0
 func (g *GlobalInstance) initialize(importedGlobals []*GlobalInstance, expr *ConstantExpression, funcRefResolver func(funcIndex Index) Reference) {
-	result, _, _ := evaluateConstExpr(
+	result, _ := evaluateConstExpr(
 		expr,
 		func(globalIndex Index) (ValueType, uint64, uint64, error) {
 			g := importedGlobals[globalIndex]
@@ -568,11 +568,11 @@ func (g *GlobalInstance) initialize(importedGlobals []*GlobalInstance, expr *Con
 			return funcRefResolver(funcIndex), nil
 		},
 	)
-	switch len(result) {
-	case 1:
-		g.Val = result[0]
-	case 2:
-		g.Val, g.ValHi = result[0], result[1]
+	switch result.ValueType {
+	case ValueTypeV128:
+		g.Val, g.ValHi = result.Val, result.ValHi
+	default:
+		g.Val = result.Val
 	}
 }
 
