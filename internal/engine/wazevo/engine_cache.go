@@ -1,6 +1,7 @@
 package wazevo
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -132,16 +133,19 @@ func (e *engine) getCompiledModuleFromCache(module *wasm.Module) (cm *compiledMo
 	if !hit || err != nil {
 		return
 	}
+	defer cached.Close()
+
+	reader := bufio.NewReader(cached)
 
 	// Otherwise, we hit the cache on external cache.
 	// We retrieve *code structures from `cached`.
 	var staleCache bool
-	// Note: cached.Close is ensured to be called in deserializeCodes.
-	cm, staleCache, err = deserializeCompiledModule(e.wazeroVersion, cached)
+	cm, staleCache, err = deserializeCompiledModule(e.wazeroVersion, reader)
 	if err != nil {
 		hit = false
 		return
 	} else if staleCache {
+		cached.Close()
 		return nil, false, e.fileCache.Delete(fileCacheKey(module))
 	}
 	return
@@ -219,19 +223,17 @@ func serializeCompiledModule(wazeroVersion string, cm *compiledModule) io.Reader
 	return bytes.NewReader(buf.Bytes())
 }
 
-func deserializeCompiledModule(wazeroVersion string, reader io.ReadCloser) (cm *compiledModule, staleCache bool, err error) {
-	defer reader.Close()
+func deserializeCompiledModule(wazeroVersion string, reader io.Reader) (cm *compiledModule, staleCache bool, err error) {
 	cacheHeaderSize := len(magic) + 1 /* version size */ + len(wazeroVersion) + 4 /* number of functions */
 
 	// Read the header before the native code.
 	header := make([]byte, cacheHeaderSize)
-	n, err := reader.Read(header)
+	n, err := io.ReadFull(reader, header)
 	if err != nil {
+		if (err == io.EOF || err == io.ErrUnexpectedEOF) && n != cacheHeaderSize {
+			return nil, false, fmt.Errorf("compilationcache: invalid header length: %d", n)
+		}
 		return nil, false, fmt.Errorf("compilationcache: error reading header: %v", err)
-	}
-
-	if n != cacheHeaderSize {
-		return nil, false, fmt.Errorf("compilationcache: invalid header length: %d", n)
 	}
 
 	if !bytes.Equal(header[:len(magic)], magic) {
@@ -430,11 +432,9 @@ func deserializeCompiledModule(wazeroVersion string, reader io.ReadCloser) (cm *
 // given array as a buffer. This returns io.EOF if less than 8 bytes were read.
 func readUint64(reader io.Reader, b *[8]byte) (uint64, error) {
 	s := b[0:8]
-	n, err := reader.Read(s)
+	_, err := io.ReadFull(reader, s)
 	if err != nil {
 		return 0, err
-	} else if n < 8 { // more strict than reader.Read
-		return 0, io.EOF
 	}
 
 	// Read the u64 from the underlying buffer.
