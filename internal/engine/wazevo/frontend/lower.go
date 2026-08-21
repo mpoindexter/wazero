@@ -221,6 +221,13 @@ func (l *loweringState) ctrlPeekAt(n int) (ret *controlFrame) {
 func (c *Compiler) lowerBody(entryBlk ssa.BasicBlock) {
 	c.ssaBuilder.Seal(entryBlk)
 
+	// Termination check needed on entering a call to handle tail-calls and
+	// exponential call graph shapes which do not contain loops
+	var moduleClosedSlow, body ssa.BasicBlock
+	if c.ensureTermination {
+		moduleClosedSlow, body = c.emitModuleClosedTest()
+	}
+
 	if c.needListener {
 		c.callListenerBefore()
 	}
@@ -243,6 +250,12 @@ func (c *Compiler) lowerBody(entryBlk ssa.BasicBlock) {
 			// After that, we initialize the known bounds for the new compilation target block.
 			c.initializeCurrentBlockKnownBounds()
 		}
+	}
+
+	if c.ensureTermination {
+		c.ssaBuilder.SetCurrentBlock(moduleClosedSlow)
+		c.emitCheckModuleExitCodeCall(body)
+		c.ssaBuilder.Seal(body)
 	}
 }
 
@@ -1505,39 +1518,9 @@ func (c *Compiler) lowerCurrentOpcode() {
 		c.switchTo(originalLen, loopHeader, bt.Params)
 
 		if c.ensureTermination {
-			// Cheap inline check: load moduleClosedPtr from execCtx, then load the
-			// ModuleInstance.Closed it points to. If zero, fall through to the loop
-			// body. If non-zero (set by the cancellation watchdog OR by an explicit
-			// module.Close from another goroutine), branch out to moduleClosedBlk,
-			// which re-enters Go to report the error.
-			//
-			// Neither load needs atomic semantics. The pointer is written once at
-			// callEngine setup; the flag is a single aligned word that only ever goes
-			// from zero to non-zero, so the worst a racing close can cost is being
-			// noticed an iteration later.
-			closedPtr := builder.AllocateInstruction().
-				AsLoad(c.execCtxPtrValue,
-					wazevoapi.ExecutionContextOffsetModuleClosedPtr.U32(),
-					ssa.TypeI64,
-				).Insert(builder).Return()
-			closed := builder.AllocateInstruction().
-				AsLoad(closedPtr, 0, ssa.TypeI64).Insert(builder).Return()
-
-			// The header ends here, so the body needs a block of its own. Neither edge
-			// carries arguments: this header is the only predecessor of either block,
-			// so the loop's params are still live and unambiguous in both without
-			// being passed.
-			loopBody := builder.AllocateBasicBlock()
-			builder.AllocateInstruction().
-				AsBrnz(closed, ssa.ValuesNil, moduleClosedBlk).
-				Insert(builder)
-			c.insertJumpToBlock(ssa.ValuesNil, loopBody)
-
-			// Lower the rest of the loop body in loopBody. The value stack still holds
-			// loopHeader's params, which are the same values there: the header
-			// dominates the body.
-			builder.SetCurrentBlock(loopBody)
-			builder.Seal(loopBody)
+			// The slow block is left empty here and filled in at the loop's End. The body
+			// block stays unsealed until then too, since that is the slow path's way back in.
+			_, _ = c.emitModuleClosedTest()
 		}
 	case wasm.OpcodeIf:
 		bt := c.readBlockType()
@@ -1640,8 +1623,20 @@ func (c *Compiler) lowerCurrentOpcode() {
 				}
 			}
 		case controlFrameKindLoop:
-			if ctrl.moduleClosedBlk != nil {
-				c.lowerModuleClosed(&ctrl)
+			if c.ensureTermination {
+				// The slow check body is emitted at the loop's end, rather than the more obvious location
+				// when processing the loop header, because block layout follows the instruction order. This
+				// matters on benchmarks: both amd64 and arm64 predict a forward branch is not taken until
+				// there is a branch prediction history, so making the rare path (module closed) the forward
+				// branch instead of the loop body being a forward branch provides a measurable speedup.
+
+				// when we emitted the fast path closed check, we created two successors of the loop header:
+				// the slow path check and the loop body, in that order
+				moduleClosedSlow, loopBody := ctrl.blk.Succ(0), ctrl.blk.Succ(1)
+
+				c.ssaBuilder.SetCurrentBlock(moduleClosedSlow)
+				c.emitCheckModuleExitCodeCall(loopBody)
+				c.ssaBuilder.Seal(loopBody)
 			}
 			// Loop header block can be reached from any br/br_table contained in the loop,
 			// so now that we've reached End of it, we can seal it.
@@ -4311,6 +4306,25 @@ func (c *Compiler) memOpSetup(baseAddr ssa.Value, constOffset, operationSizeInBy
 		}
 	}
 
+	// A constant base address whose access end lies within the memory's
+	// minimum size can never be out of bounds: memories only ever grow, so
+	// the declared minimum is a static lower bound on the current length.
+	if def := builder.InstructionOfValue(baseAddr); def != nil && def.Constant() {
+		if uint64(uint32(def.ConstantVal()))+ceil <= c.memoryMinSizeInBytes {
+			if !address.Valid() {
+				memBase := c.getMemoryBaseValue(false)
+				extBaseAddr := builder.AllocateInstruction().
+					AsUExtend(baseAddr, 32, 64).
+					Insert(builder).
+					Return()
+				address = builder.AllocateInstruction().
+					AsIadd(memBase, extBaseAddr).Insert(builder).Return()
+			}
+			c.recordKnownSafeBound(baseAddrID, ceil, address)
+			return
+		}
+	}
+
 	ceilConst := builder.AllocateInstruction()
 	ceilConst.AsIconst64(ceil)
 	builder.InsertInstruction(ceilConst)
@@ -5521,18 +5535,48 @@ func (c *Compiler) insertJumpToBlock(args ssa.Values, targetBlk ssa.BasicBlock) 
 	builder.InsertInstruction(jmp)
 }
 
-// lowerModuleClosed fills in the block a loop's module-closed check branches to when it finds
-// the flag set. It calls back into Go, which fails the call with the module's exit code, and
-// jumps back to the check for the case where the module turns out not to be closed after all
-// and the call returns. Going back to the check rather than into the body is what leaves the
-// body with a single predecessor, and so with no block parameters.
-//
-// This runs at the loop's End, not where the check is emitted, because block layout follows
-// the order blocks were first written to: written last, this one lands after the whole loop,
-// and the check falls through into the body instead of branching to it.
-func (c *Compiler) lowerModuleClosed(ctrl *controlFrame) {
+// emitModuleClosedTest emits the cheap inline module-closed test into the current block.
+func (c *Compiler) emitModuleClosedTest() (moduleClosedSlow, notClosed ssa.BasicBlock) {
 	builder := c.ssaBuilder
-	builder.SetCurrentBlock(ctrl.moduleClosedBlk)
+
+	// Load moduleClosedPtr from execCtx, then load the ModuleInstance.Closed it points to. If
+	// zero, fall through. If non-zero (set by the cancellation watchdog OR by an explicit
+	// module.Close from another goroutine), branch to a slow block that re-enters Go via the
+	// checkModuleExitCode trampoline.
+	//
+	// Neither load needs atomic semantics. The pointer is written once at callEngine setup; the
+	// flag is a single aligned word that only ever goes from zero to non-zero, so the worst a
+	// racing close can cost is being noticed one check later.
+	closedPtr := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue,
+			wazevoapi.ExecutionContextOffsetModuleClosedPtr.U32(),
+			ssa.TypeI64,
+		).Insert(builder).Return()
+	closed := builder.AllocateInstruction().
+		AsLoad(closedPtr, 0, ssa.TypeI64).Insert(builder).Return()
+
+	zero := builder.AllocateInstruction().AsIconst64(0).Insert(builder).Return()
+	closedNonZero := builder.AllocateInstruction().
+		AsIcmp(closed, zero, ssa.IntegerCmpCondNotEqual).Insert(builder).Return()
+
+	moduleClosedSlow, notClosed = builder.AllocateBasicBlock(), builder.AllocateBasicBlock()
+	builder.AllocateInstruction().
+		AsBrnz(closedNonZero, ssa.ValuesNil, moduleClosedSlow).
+		Insert(builder)
+	c.insertJumpToBlock(ssa.ValuesNil, notClosed)
+
+	// This branch is the slow block's only way in, so it is already complete. notClosed is
+	// not: the caller decides whether the slow path rejoins it.
+	builder.Seal(moduleClosedSlow)
+
+	builder.SetCurrentBlock(notClosed)
+	return
+}
+
+// emitCheckModuleExitCodeCall calls the trampoline that re-enters Go to perform the full,
+// atomic check for module closed. It normally panics with the exit error and never comes back.
+func (c *Compiler) emitCheckModuleExitCodeCall(target ssa.BasicBlock) {
+	builder := c.ssaBuilder
 
 	checkModuleExitCodePtr := builder.AllocateInstruction().
 		AsLoad(c.execCtxPtrValue,
@@ -5543,18 +5587,7 @@ func (c *Compiler) lowerModuleClosed(ctrl *controlFrame) {
 		AsCallIndirect(checkModuleExitCodePtr, &c.checkModuleExitCodeSig,
 			c.allocateVarLengthValues(1, c.execCtxPtrValue)).
 		Insert(builder)
-
-	// The loop header is still unsealed, so its parameters are still only the loop's own:
-	// the ones any local read inside the body needs are added when it is sealed, just
-	// after this, and this branch gets its arguments for them then, like every other
-	// predecessor does.
-	loopHeader := ctrl.blk
-	backArgs := c.allocateVarLengthValues(loopHeader.Params())
-	for i := 0; i < loopHeader.Params(); i++ {
-		backArgs = backArgs.Append(builder.VarLengthPool(), loopHeader.Param(i))
-	}
-	c.insertJumpToBlock(backArgs, loopHeader)
-	builder.Seal(ctrl.moduleClosedBlk)
+	c.insertJumpToBlock(ssa.ValuesNil, target)
 }
 
 // insertIntegerExtend widens the operand from a from-bit value to a to-typed one. to is the

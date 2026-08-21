@@ -9,7 +9,7 @@ import (
 // retake the P after ~10ms and run other goroutines on it, even if the
 // wasm goroutine is in a long-running native loop.
 //
-// Same trick used by gvisor (see runtime/proc.go: "hall of shame" comment
+// Same trick used by gvisor (see runtime/proc.go: comment
 // on entersyscallblock — the runtime team has committed to not changing
 // the type signatures of these entry points).
 

@@ -13,7 +13,7 @@ import (
 
 // BenchmarkContextDoneOverhead isolates the cost paid by `WithCloseOnContextDone(true)`.
 //
-// Every wasm `loop` opcode header emits a Go-trampoline call when ensureTermination is on;
+// Every wasm `loop` opcode header emits a module closed check when ensureTermination is on;
 // every Wasm call also spawns a watchdog goroutine via CloseModuleOnCanceledOrTimeout.
 // We vary iterations-per-call so the two cost regimes can be separated:
 //
